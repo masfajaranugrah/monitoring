@@ -1,1 +1,0 @@
-/opt/homebrew/Cellar/postgresql@17/17.11/bin/postgres "-D" "/Users/fajar/Downloads/monitoring/.data/pg" "-p" "55432" "-k" "/Users/fajar/Downloads/monitoring/.data/pg" "-c" "listen_addresses=127.0.0.1"
