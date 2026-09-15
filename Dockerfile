@@ -4,8 +4,8 @@ RUN apk add --no-cache build-base
 WORKDIR /app
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
-COPY backend/ ./backend/
-RUN go build -o /out/fiber-monitor ./backend/cmd/server
+COPY backend/ ./
+RUN go build -o /out/fiber-monitor ./cmd/server
 
 # ---- Build stage for the Vue frontend ----
 FROM node:20-alpine AS frontend-build
