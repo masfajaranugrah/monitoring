@@ -5,7 +5,8 @@ WORKDIR /app
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
-RUN go build -o /out/fiber-monitor ./cmd/server
+# CGO disabled => static binary (no musl/glibc dependency at runtime)
+RUN CGO_ENABLED=0 go build -o /out/fiber-monitor ./cmd/server && file /out/fiber-monitor
 
 # ---- Build stage for the Vue frontend ----
 FROM node:20-alpine AS frontend-build
