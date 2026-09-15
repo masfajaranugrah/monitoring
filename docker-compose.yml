@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-monitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-monitor123}
+      POSTGRES_DB: ${POSTGRES_DB:-fiber_monitor}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: "${SERVER_PORT:-8080}"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD:-monitor123}@db:5432/${POSTGRES_DB:-fiber_monitor}?sslmode=disable"
+      JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      JWT_EXPIRY_HOURS: "${JWT_EXPIRY_HOURS:-24}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      PING_CONCURRENCY: "${PING_CONCURRENCY:-30}"
+      PING_HISTORY_RETENTION_DAYS: "${PING_HISTORY_RETENTION_DAYS:-7}"
+      ADMIN_INITIAL_USERNAME: "${ADMIN_INITIAL_USERNAME:-admin}"
+      ADMIN_INITIAL_PASSWORD: "${ADMIN_INITIAL_PASSWORD:-admin123}"
+      GIN_MODE: release
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    # Required to create VPN tunnels and send ICMP as root.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - /etc/ppp:/etc/ppp
+      - /tmp:/tmp
+      - /lib/modules:/lib/modules:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
