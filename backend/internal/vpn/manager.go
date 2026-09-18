@@ -37,7 +37,7 @@ func (m *Manager) Connect(v *models.VPNConnection, password string) error {
 		killPPTPInstance(linkToken(v.Name), v.ServerAddress)
 		time.Sleep(700 * time.Millisecond)
 	}
-	before := listPPPInterfaces()
+	before := snapshotPPP()
 
 	var err error
 	switch models.VpnType(v.VPNType) {
@@ -63,48 +63,60 @@ func (m *Manager) Connect(v *models.VPNConnection, password string) error {
 	return nil
 }
 
-// listPPPInterfaces returns the set of currently present ppp interfaces.
-func listPPPInterfaces() map[string]struct{} {
-	set := make(map[string]struct{})
-	out, err := exec.Command("ip", "-o", "link", "show").Output()
+// snapshotPPP returns name -> hasIPv4 for every current ppp interface. Names
+// alone are unreliable because pppd reuses ppp0 immediately after the old
+// process dies, so we key on IP presence: a tunnel only counts as up when a
+// ppp interface that was not carrying an address before now has one.
+func snapshotPPP() map[string]bool {
+	up := make(map[string]bool)
+	out, err := exec.Command("ip", "-o", "-4", "addr", "show").Output()
 	if err != nil {
-		return set
+		return up
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			name := strings.TrimSuffix(fields[1], ":")
-			if strings.HasPrefix(name, "ppp") {
-				set[name] = struct{}{}
-			}
+		if len(fields) < 4 {
+			continue
+		}
+		name := strings.TrimSuffix(fields[1], ":")
+		family := strings.TrimSuffix(fields[2], ":")
+		if !strings.HasPrefix(name, "ppp") || family != "inet" {
+			continue
+		}
+		ip, _, err := net.ParseCIDR(fields[3])
+		if err == nil && ip != nil {
+			up[name] = true
 		}
 	}
-	return set
+	return up
 }
 
-// waitForNewPPP polls until a ppp interface that was not in `before` has an
-// IPv4 address (i.e. IPCP completed), returning its name.
-func (m *Manager) waitForNewPPP(before map[string]struct{}, timeout time.Duration) (string, bool) {
+// waitForNewPPP polls until a ppp interface that was not up (had an IPv4
+// address) in `before` comes up, returning its name. Because pppN names are
+// reused, "was not up before" is the reliable signal for a freshly connected
+// tunnel.
+func (m *Manager) waitForNewPPP(before map[string]bool, timeout time.Duration) (string, bool) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
-		out, err := exec.Command("ip", "-o", "link", "show").Output()
+		out, err := exec.Command("ip", "-o", "-4", "addr", "show").Output()
 		if err != nil {
 			continue
 		}
 		for _, line := range strings.Split(string(out), "\n") {
 			fields := strings.Fields(line)
-			if len(fields) < 2 {
+			if len(fields) < 4 {
 				continue
 			}
 			name := strings.TrimSuffix(fields[1], ":")
-			if !strings.HasPrefix(name, "ppp") {
+			family := strings.TrimSuffix(fields[2], ":")
+			if !strings.HasPrefix(name, "ppp") || family != "inet" {
 				continue
 			}
-			if _, existed := before[name]; existed {
+			if before[name] {
 				continue
 			}
-			if ip, err := m.interfaceIP(name); err == nil && ip != "" {
+			if ip, _, err := net.ParseCIDR(fields[3]); err == nil && ip != nil {
 				return name, true
 			}
 		}
