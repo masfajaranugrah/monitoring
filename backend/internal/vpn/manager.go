@@ -193,7 +193,7 @@ func (m *Manager) connectPPTPCmd(v *models.VPNConnection, password string) error
 	opt := fmt.Sprintf(`pty "pptp %s --nolaunchpppd"
 name %s
 password %s
-remotename pptp-peer
+remotename PPTP
 noauth
 defaultroute
 noipdefault
@@ -203,6 +203,8 @@ nopcomp
 noaccomp
 novj
 novjccomp
+require-mppe-128
+refuse-eap
 lcp-echo-interval 60
 lcp-echo-failure 3
 mtu 1400
@@ -225,6 +227,9 @@ maxfail 0
 		time.Sleep(20 * time.Second)
 		_ = os.Remove(peerFile)
 	}()
+
+	// Pastikan modul MPPE termuat (banyak server PPTP mewajibkan enkripsi).
+	_ = exec.Command("modprobe", "ppp_mppe").Run()
 
 	// Jalankan pppd dengan peer config (pptp tunnel di-handle oleh pty).
 	cmd := exec.Command("pppd", "call", "pptp-"+token)
