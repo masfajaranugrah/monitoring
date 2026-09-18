@@ -231,12 +231,18 @@ function applyRealtime() {
 }
 
 watch(() => monitor.lastEvent, applyRealtime)
+
+let refreshTimer = null
+
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   load()
+  refreshTimer = setInterval(load, 15000)
 })
+
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 

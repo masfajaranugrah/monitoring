@@ -17,6 +17,7 @@ const search = ref('')
 const searchOpen = ref(false)
 const loading = ref(true)
 let mapView = null
+let refreshTimer = null
 const { areaResults, areaLoading, clearArea, areaZoom } = useAreaSearch(search)
 
 async function load() {
@@ -96,10 +97,12 @@ watch(filteredList, (list) => {
 onMounted(() => {
   load()
   monitor.fetchStats()
+  refreshTimer = setInterval(load, 15000)
 })
 
 onBeforeUnmount(() => {
   mapView = null
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 

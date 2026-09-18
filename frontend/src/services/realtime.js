@@ -51,13 +51,13 @@ function connect() {
   source.onerror = (err) => {
     const store = useMonitorStore()
     store.connected = false
-    source.close()
-    source = null
-    if (err?.eventPhase === EventSource.CLOSED) {
-      // Reconnect after a delay so the server has time to restart.
-      clearTimeout(retryTimer)
-      retryTimer = setTimeout(connect, 5000)
+    if (source) {
+      source.close()
+      source = null
     }
+    // Always retry so realtime survives transient errors / proxy resets.
+    clearTimeout(retryTimer)
+    retryTimer = setTimeout(connect, 3000)
   }
 }
 
