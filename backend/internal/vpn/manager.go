@@ -355,6 +355,29 @@ func (m *Manager) connectPPTPViaPPPD(v *models.VPNConnection, password string) e
 
 // ---------- Common ----------
 
+// findIfaceByIP returns the network interface currently holding the given
+// IPv4 address (e.g. "ppp0"), or "" if none. This is robust against stale
+// interface_name data in the DB.
+func (m *Manager) findIfaceByIP(target string) string {
+	if target == "" {
+		return ""
+	}
+	out, err := exec.Command("ip", "-o", "-4", "addr", "show").Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 4 && fields[2] == "inet" {
+			ip := strings.Split(fields[3], "/")[0]
+			if ip == target {
+				return strings.TrimSuffix(fields[1], ":")
+			}
+		}
+	}
+	return ""
+}
+
 // Disconnect brings the tunnel interface down.
 func (m *Manager) Disconnect(v *models.VPNConnection) {
 	token := linkToken(v.Name)
@@ -362,20 +385,19 @@ func (m *Manager) Disconnect(v *models.VPNConnection) {
 		killPPTPInstance(token, v.ServerAddress)
 	}
 	iface := m.interfaceName(v)
-	// Interface pppN bisa dipakai ulang oleh VPN lain setelah reconnect
-	// kacau; jangan hapus interface milik VPN lain. Bandingkan IP-nya.
-	if iface != "" && strings.HasPrefix(iface, "ppp") {
-		if ip, err := m.interfaceIP(iface); err == nil && v.LocalIP != "" && ip != v.LocalIP {
-			log.Printf("[vpn] disconnect %s: %s belongs to other tunnel (%s != %s), skipping interface removal", v.Name, iface, ip, v.LocalIP)
-			return
-		}
+	// Jangan percaya penuh interface_name: pppN bisa saja dipakai ulang
+	// oleh tunnel lain. Prioritaskan interface yang benar-benar membawa
+	// Local IP VPN ini.
+	if byIP := m.findIfaceByIP(v.LocalIP); byIP != "" {
+		iface = byIP
 	}
-	// Generic PPP disconnect: try ip link delete, then ifdown.
-	_ = exec.Command("ip", "link", "set", "dev", iface, "down").Run()
-	_ = exec.Command("ip", "link", "delete", "dev", iface).Run()
-	// L2TP specific.
-	_ = exec.Command("xl2tpd-control", "disconnect", iface).Run()
-	log.Printf("[vpn] disconnect issued for %s", v.Name)
+	if iface != "" {
+		_ = exec.Command("ip", "link", "set", "dev", iface, "down").Run()
+		_ = exec.Command("ip", "link", "delete", "dev", iface).Run()
+		// L2TP specific.
+		_ = exec.Command("xl2tpd-control", "disconnect", iface).Run()
+	}
+	log.Printf("[vpn] disconnect issued for %s (iface %s)", v.Name, iface)
 }
 
 // Status checks whether the tunnel interface is up and returns its status.

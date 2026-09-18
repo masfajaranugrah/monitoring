@@ -306,6 +306,13 @@ func (h *VPNHandler) ConnectVPN(c *gin.Context) {
 	// Check if already connected.
 	currentStatus, currentIP := h.Manager.Status(&v)
 	if currentStatus == models.VpnConnected {
+		// Tunnel nyata sudah hidup, tapi status DB bisa saja masih
+		// DISCONNECTED (dari connect sebelumnya yang timeout di persist).
+		// Sinkronkan agar card/UI konsisten dengan kenyataan.
+		_, _ = database.Pool.Exec(ctx,
+			`UPDATE vpn_connections SET status='CONNECTED', local_ip=$1,
+			  interface_name=$2, last_connected_at=now(), updated_at=now() WHERE id=$3`,
+			currentIP, v.InterfaceName, id)
 		c.JSON(http.StatusOK, gin.H{
 			"connected": true,
 			"status":    currentStatus,
