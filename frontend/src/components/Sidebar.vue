@@ -12,6 +12,7 @@ const items = [
   { to: '/vpn', icon: 'network', label: 'VPN Connections' },
   { to: '/history', icon: 'activity', label: 'Ping History' },
   { to: '/alerts', icon: 'bell', label: 'Alerts' },
+  { to: '/terminal', icon: 'terminal', label: 'Terminal', admin: true },
   { to: '/settings', icon: 'settings', label: 'Settings' }
 ]
 </script>
@@ -29,6 +30,7 @@ const items = [
     <nav class="sidebar__nav">
       <router-link
         v-for="item in items"
+        v-show="!item.admin || auth.isAdmin"
         :key="item.to"
         :to="item.to"
         class="sidebar__link"

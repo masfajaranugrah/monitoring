@@ -24,7 +24,7 @@ func (s *Store) LoadMonitorData(ctx context.Context) ([]ping.CustomerJob, error)
 	rows, err := database.Pool.Query(ctx, `
 		SELECT c.id, c.ip_address, c.vpn_id, c.status,
 		       c.ping_interval, c.timeout_ms, c.retry_count, c.monitoring_enabled,
-		       COALESCE(v.local_ip, '')
+		       COALESCE(v.local_ip, ''), COALESCE(v.interface_name, '')
 		FROM customers c
 		LEFT JOIN vpn_connections v ON v.id = c.vpn_id
 		WHERE c.monitoring_enabled = true
@@ -39,7 +39,7 @@ func (s *Store) LoadMonitorData(ctx context.Context) ([]ping.CustomerJob, error)
 		var j ping.CustomerJob
 		var vpnID sql.NullInt64
 		if err := rows.Scan(&j.CustomerID, &j.IPAddress, &vpnID, &j.Status,
-			&j.IntervalSec, &j.TimeoutMs, &j.Retries, &j.Monitored, &j.SourceIP); err != nil {
+			&j.IntervalSec, &j.TimeoutMs, &j.Retries, &j.Monitored, &j.SourceIP, &j.Interface); err != nil {
 			return nil, err
 		}
 		if vpnID.Valid {

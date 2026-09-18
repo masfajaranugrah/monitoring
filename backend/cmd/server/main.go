@@ -53,14 +53,14 @@ func main() {
 
 	// --- Monitoring engine ---
 	storer := store.New()
-	engine := ping.NewMonitorEngine(storer, hub, cfg.PingConcurrency)
+	vpnManager := vpn.NewManager()
+	engine := ping.NewMonitorEngine(storer, hub, cfg.PingConcurrency, vpnManager.EnsureRoute)
 	engine.Start(ctx)
 
 	// --- Background retention ---
 	go store.RetentionWorker(ctx)
 
 	// --- VPN manager ---
-	vpnManager := vpn.NewManager()
 	vpnHandler := handlers.NewVPNHandler(vpnManager)
 
 	// --- Auto-connect semua VPN aktif saat server menyala ---
@@ -144,6 +144,9 @@ func main() {
 			// Alerts
 			auth.GET("/alerts", handlers.AlertsList)
 			auth.PATCH("/alerts/:id/read", handlers.AlertMarkRead)
+
+			// Web terminal (admin only)
+			auth.GET("/terminal/ws", middleware.AdminOnly(), handlers.TerminalWS)
 		}
 	}
 

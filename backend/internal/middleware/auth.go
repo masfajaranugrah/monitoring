@@ -39,21 +39,25 @@ func GenerateToken(userID int64, username, role string, expiryHours int) (string
 
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		// WebSocket clients can't set an Authorization header, so also accept
+		// the token as a query parameter (?token=...).
+		tokenStr := ""
+		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+			parts := strings.Split(authHeader, " ")
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenStr = parts[1]
+			}
+		}
+		if tokenStr == "" {
+			tokenStr = c.Query("token")
+		}
+		if tokenStr == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			c.Abort()
 			return
 		}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authorization header"})
-			c.Abort()
-			return
-		}
-
-		token, err := jwt.ParseWithClaims(parts[1], &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
 			return jwtSecret, nil
 		})
 		if err != nil || !token.Valid {

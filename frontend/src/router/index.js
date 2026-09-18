@@ -10,6 +10,7 @@ const routes = [
   { path: '/vpn', name: 'vpn', component: () => import('../views/VPNView.vue') },
   { path: '/history', name: 'history', component: () => import('../views/PingHistoryView.vue') },
   { path: '/alerts', name: 'alerts', component: () => import('../views/AlertsView.vue') },
+  { path: '/terminal', name: 'terminal', component: () => import('../views/TerminalView.vue') },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') }
 ]
 

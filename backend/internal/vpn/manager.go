@@ -350,6 +350,19 @@ func (m *Manager) Test(v *models.VPNConnection, timeout time.Duration) (bool, in
 	return false, res.RTT.Milliseconds(), res.ErrorMsg
 }
 
+// EnsureRoute makes sure an ICMP probe to a customer IP goes through the VPN
+// tunnel interface. Without this the kernel uses the default route (ens18)
+// even when the ping source IP belongs to the tunnel. `ip route replace` is
+// idempotent and self-heals across pppd reconnects.
+func (m *Manager) EnsureRoute(ip, iface string) {
+	if ip == "" || iface == "" {
+		return
+	}
+	if err := exec.Command("ip", "route", "replace", ip+"/32", "dev", iface).Run(); err != nil {
+		log.Printf("[vpn] route %s via %s failed: %v", ip, iface, err)
+	}
+}
+
 // SourceIP returns the VPN tunnel local IP to use as the ping source for
 // customer probes routed through this VPN.
 func (m *Manager) SourceIP(v *models.VPNConnection) string {

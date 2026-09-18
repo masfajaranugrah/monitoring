@@ -18,6 +18,8 @@ type MonitorEngine struct {
 	workerCount int
 	queue       chan workItem
 
+	ensureRoute func(ip, iface string)
+
 	mu          sync.RWMutex
 	jobs        []CustomerJob
 	nextRun     map[int64]time.Time
@@ -28,7 +30,7 @@ type MonitorEngine struct {
 }
 
 // CustomerJob is the monitoring configuration for one customer plus the VPN
-// source IP used to route the ping through the correct tunnel.
+// source IP / interface used to route the ping through the correct tunnel.
 type CustomerJob struct {
 	CustomerID  int64
 	IPAddress   string
@@ -39,6 +41,7 @@ type CustomerJob struct {
 	Retries     int
 	Monitored   bool
 	SourceIP    string
+	Interface   string
 }
 
 type workItem struct {
@@ -46,6 +49,7 @@ type workItem struct {
 	ip         string
 	vpnID      *int64
 	source     string
+	iface      string
 	timeout    time.Duration
 }
 
@@ -88,10 +92,10 @@ type EventPublisher interface {
 
 const (
 	defWorkerCount = 30
-	reloadInterval  = 30 * time.Second
+	reloadInterval = 30 * time.Second
 )
 
-func NewMonitorEngine(db Storer, hub EventPublisher, workerCount int) *MonitorEngine {
+func NewMonitorEngine(db Storer, hub EventPublisher, workerCount int, ensureRoute func(ip, iface string)) *MonitorEngine {
 	if workerCount <= 0 {
 		workerCount = defWorkerCount
 	}
@@ -101,6 +105,7 @@ func NewMonitorEngine(db Storer, hub EventPublisher, workerCount int) *MonitorEn
 		pinger:      NewICMPPinger(),
 		workerCount: workerCount,
 		queue:       make(chan workItem, workerCount*4),
+		ensureRoute: ensureRoute,
 		nextRun:     make(map[int64]time.Time),
 		nextSeq:     make(map[int64]int),
 		reloadEvery: reloadInterval,
@@ -214,6 +219,7 @@ func (m *MonitorEngine) enqueue(j CustomerJob, now time.Time) {
 		ip:         j.IPAddress,
 		vpnID:      j.VPNID,
 		source:     j.SourceIP,
+		iface:      j.Interface,
 		timeout:    time.Duration(j.TimeoutMs) * time.Millisecond,
 	}
 	select {
@@ -240,6 +246,10 @@ func (m *MonitorEngine) worker(ctx context.Context) {
 func (m *MonitorEngine) process(ctx context.Context, job workItem) {
 	tctx, cancel := context.WithTimeout(ctx, 3*time.Second+job.timeout)
 	defer cancel()
+
+	if job.iface != "" && m.ensureRoute != nil {
+		m.ensureRoute(job.ip, job.iface)
+	}
 
 	result := m.pinger.Ping(job.ip, job.source, job.timeout)
 
