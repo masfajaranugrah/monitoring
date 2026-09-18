@@ -134,6 +134,66 @@ onBeforeUnmount(() => {
             <li v-if="!areaResults.length" class="search-drop__empty">
               Wilayah tidak ditemukan
             </li>
+          </template>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <span class="filter-group__label">Status:</span>
+        <button
+          v-for="s in ['ALL', 'ONLINE', 'OFFLINE', 'WARNING']"
+          :key="s"
+          class="filter-chip"
+          :class="{ 'filter-chip--active': statusFilter === s, [`filter-chip--${s.toLowerCase()}`]: statusFilter === s }"
+          @click="statusFilter = s; load()"
+        >
+          {{ s }}
+        </button>
+      </div>
+
+      <select v-model="vpnFilter" class="select" @change="load()">
+        <option value="ALL">ALL VPN</option>
+        <option v-for="v in monitor.vpns" :key="v.id" :value="v.id">{{ v.name }}</option>
+      </select>
+    </div>
+
+    <div class="mapmon__body">
+      <div class="mapmon__map">
+        <MapView
+          ref="mapView"
+          :customers="customers"
+          :status-filter="statusFilter"
+          :vpn-filter="vpnFilter"
+          @open-detail="openDetail"
+        />
+        <div class="legend">
+          <div class="legend__item"><span class="legend__dot legend__dot--online" /> ONLINE</div>
+          <div class="legend__item"><span class="legend__dot legend__dot--offline" /> OFFLINE</div>
+          <div class="legend__item"><span class="legend__dot legend__dot--warning" /> WARNING</div>
+        </div>
+      </div>
+
+      <div class="mapmon__list panel">
+        <h3 class="mapmon__list-title">Pelanggan <span>{{ filteredList.length }}</span></h3>
+        <ul class="mapmon__list-items">
+          <li
+            v-for="c in filteredList"
+            :key="c.id"
+            class="mapmon__item"
+            @click="focusOnList(c)"
+          >
+            <StatusBadge :status="c.status" />
+            <div class="mapmon__item-main">
+              <strong>{{ c.customer_name }}</strong>
+              <span>{{ c.customer_code }} · {{ c.ip_address }} · {{ c.vpn_name || '-' }}</span>
+            </div>
+            <span v-if="c.latency_ms != null" class="mapmon__item-ms">{{ c.latency_ms }} ms</span>
+          </li>
+          <li v-if="!filteredList.length" class="mapmon__empty">Tidak ada pelanggan</li>
+        </ul>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -202,63 +262,3 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 </style>
-        </div>
-      </div>
-
-      <div class="filter-group">
-        <span class="filter-group__label">Status:</span>
-        <button
-          v-for="s in ['ALL', 'ONLINE', 'OFFLINE', 'WARNING']"
-          :key="s"
-          class="filter-chip"
-          :class="{ 'filter-chip--active': statusFilter === s, [`filter-chip--${s.toLowerCase()}`]: statusFilter === s }"
-          @click="statusFilter = s; load()"
-        >
-          {{ s }}
-        </button>
-      </div>
-
-      <select v-model="vpnFilter" class="select" @change="load()">
-        <option value="ALL">ALL VPN</option>
-        <option v-for="v in monitor.vpns" :key="v.id" :value="v.id">{{ v.name }}</option>
-      </select>
-    </div>
-
-    <div class="mapmon__body">
-      <div class="mapmon__map">
-        <MapView
-          ref="mapView"
-          :customers="customers"
-          :status-filter="statusFilter"
-          :vpn-filter="vpnFilter"
-          @open-detail="openDetail"
-        />
-        <div class="legend">
-          <div class="legend__item"><span class="legend__dot legend__dot--online" /> ONLINE</div>
-          <div class="legend__item"><span class="legend__dot legend__dot--offline" /> OFFLINE</div>
-          <div class="legend__item"><span class="legend__dot legend__dot--warning" /> WARNING</div>
-        </div>
-      </div>
-
-      <div class="mapmon__list panel">
-        <h3 class="mapmon__list-title">Pelanggan <span>{{ filteredList.length }}</span></h3>
-        <ul class="mapmon__list-items">
-          <li
-            v-for="c in filteredList"
-            :key="c.id"
-            class="mapmon__item"
-            @click="focusOnList(c)"
-          >
-            <StatusBadge :status="c.status" />
-            <div class="mapmon__item-main">
-              <strong>{{ c.customer_name }}</strong>
-              <span>{{ c.customer_code }} · {{ c.ip_address }} · {{ c.vpn_name || '-' }}</span>
-            </div>
-            <span v-if="c.latency_ms != null" class="mapmon__item-ms">{{ c.latency_ms }} ms</span>
-          </li>
-          <li v-if="!filteredList.length" class="mapmon__empty">Tidak ada pelanggan</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</template>

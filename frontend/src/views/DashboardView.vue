@@ -1,8 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import MapView from '../components/MapView.vue'
+import StatusBadge from '../components/StatusBadge.vue'
 import { useMonitorStore } from '../stores/monitor'
 import { useAreaSearch } from '../composables/useAreaSearch'
 
@@ -67,6 +68,100 @@ const showAddModal = ref(false)
 const addForm = ref({ customer_name: '', ip_address: '', vpn_id: '' })
 const saving = ref(false)
 const addError = ref('')
+
+const mapExpanded = ref(false)
+const fullStartView = ref(null)
+const fullMapView = ref(null)
+const fullSearch = ref('')
+const fullSearchOpen = ref(false)
+const fullAreaSearch = ref('')
+const fullAreaOpen = ref(false)
+const { areaResults: fullAreaResults, areaLoading: fullAreaLoading, clearArea: clearFullArea } = useAreaSearch(fullAreaSearch)
+
+const fullResults = computed(() => {
+  const q = fullSearch.value.toLowerCase().trim()
+  if (!q) return []
+  return customers.value
+    .filter(
+      (c) =>
+        c.customer_code?.toLowerCase().includes(q) ||
+        c.customer_name?.toLowerCase().includes(q) ||
+        c.ip_address?.toLowerCase().includes(q)
+    )
+    .slice(0, 8)
+})
+
+const fullList = computed(() => {
+  const q = fullSearch.value.toLowerCase().trim()
+  if (!q) return customers.value
+  return customers.value.filter(
+    (c) =>
+      c.customer_code?.toLowerCase().includes(q) ||
+      c.customer_name?.toLowerCase().includes(q) ||
+      c.ip_address?.toLowerCase().includes(q)
+  )
+})
+
+function openFullscreen() {
+  fullStartView.value = mapView.value?.getView() || null
+  fullSearch.value = ''
+  fullSearchOpen.value = false
+  fullAreaSearch.value = ''
+  fullAreaOpen.value = false
+  mapExpanded.value = true
+}
+
+function closeFullscreen() {
+  const v = fullMapView.value?.getView()
+  if (v && mapView.value) mapView.value.flyTo(v.lat, v.lng, v.zoom)
+  mapExpanded.value = false
+  fullSearch.value = ''
+  fullSearchOpen.value = false
+  fullAreaSearch.value = ''
+  fullAreaOpen.value = false
+}
+
+function focusFromFull(c) {
+  if (c.latitude == null || c.longitude == null) return
+  fullMapView.value?.focusCustomer(c)
+}
+
+function pickFullFirst() {
+  if (fullResults.value.length) focusFromFull(fullResults.value[0])
+}
+
+function focusFromFullArea(a) {
+  fullMapView.value?.flyTo(Number(a.lat), Number(a.lon), areaZoom(a), a.display_name)
+  clearFullArea()
+  fullAreaSearch.value = ''
+  fullAreaOpen.value = false
+}
+
+function pickFullAreaFirst() {
+  if (fullAreaResults.value.length) focusFromFullArea(fullAreaResults.value[0])
+  else if (fullResults.value.length) focusFromFull(fullResults.value[0])
+}
+
+function onFullAreaBlur() {
+  setTimeout(() => {
+    fullAreaOpen.value = false
+  }, 150)
+}
+
+function onFullSearchBlur() {
+  setTimeout(() => {
+    fullSearchOpen.value = false
+  }, 150)
+}
+
+function openFromFull(c) {
+  mapExpanded.value = false
+  openDetail(c)
+}
+
+function onKeydown(e) {
+  if (e.key === 'Escape' && mapExpanded.value) closeFullscreen()
+}
 
 async function load() {
   try {
@@ -135,7 +230,13 @@ function applyRealtime() {
 }
 
 watch(() => monitor.lastEvent, applyRealtime)
-onMounted(load)
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  load()
+})
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
@@ -230,9 +331,124 @@ onMounted(load)
         <div class="legend__item"><span class="legend__dot legend__dot--offline" /> OFFLINE</div>
         <div class="legend__item"><span class="legend__dot legend__dot--warning" /> WARNING</div>
       </div>
+
+      <button class="map-expand" title="Perbesar peta" @click="openFullscreen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+      </button>
     </div>
 
-    <div v-if="showAddModal" class="modal-mask" @click.self="cancelAdd">
+    <div v-if="mapExpanded" class="map-full" role="dialog" aria-modal="true">
+      <MapView
+        ref="fullMapView"
+        :customers="customers"
+        :status-filter="statusFilter"
+        :vpn-filter="vpnFilter"
+        :initial-view="fullStartView"
+        :click-to-add="true"
+        :draft-point="draft"
+        @open-detail="openFromFull"
+        @map-click="onMapClick"
+      />
+
+      <div class="map-full__top">
+        <button class="map-full__back" @click="closeFullscreen">
+          <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+          Kembali
+        </button>
+
+        <div class="map-full__area">
+          <div class="map-full__area-wrap">
+            <div class="search">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              <input
+                v-model="fullAreaSearch"
+                placeholder="Cari wilayah..."
+                @focus="fullAreaOpen = true"
+                @input="fullAreaOpen = !!fullAreaSearch.trim()"
+                @blur="onFullAreaBlur"
+                @keydown.enter="pickFullAreaFirst"
+              />
+            </div>
+            <div v-if="fullAreaOpen && fullAreaSearch.trim()" class="search-drop">
+              <div class="search-drop__head">Wilayah</div>
+              <li v-if="fullAreaLoading" class="search-drop__empty">Mencari wilayah...</li>
+              <template v-else>
+                <li
+                  v-for="a in fullAreaResults"
+                  :key="'fa' + a.osm_id"
+                  @mousedown.prevent="focusFromFullArea(a)"
+                >
+                  <strong>{{ a.name || a.display_name }}</strong>
+                  <span class="search-drop__meta search-drop__meta--ellipsis">{{ a.display_name }}</span>
+                </li>
+                <li v-if="!fullAreaResults.length" class="search-drop__empty">
+                  Wilayah tidak ditemukan
+                </li>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <div class="map-full__panel">
+          <div class="map-full__search-wrap">
+            <div class="search">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              <input
+                v-model="fullSearch"
+                placeholder="Cari kode, nama, atau IP..."
+                @focus="fullSearchOpen = true"
+                @input="fullSearchOpen = !!fullSearch.trim()"
+                @blur="onFullSearchBlur"
+                @keydown.enter="pickFullFirst"
+              />
+            </div>
+            <div v-if="fullSearchOpen && (fullSearch.trim() || fullResults.length)" class="search-drop">
+              <div class="search-drop__head">Pelanggan</div>
+              <template v-if="fullResults.length">
+                <li
+                  v-for="c in fullResults"
+                  :key="'f' + c.id"
+                  @mousedown.prevent="focusFromFull(c)"
+                >
+                  <strong>{{ c.customer_name }}</strong>
+                  <span class="search-drop__meta">{{ c.customer_code }} · {{ c.ip_address }} · {{ c.status }}</span>
+                </li>
+              </template>
+              <li v-else class="search-drop__empty">Tidak ada pelanggan cocok</li>
+            </div>
+          </div>
+
+          <div class="map-full__list-head">
+            <span>Daftar Pelanggan</span>
+            <span class="map-full__count">{{ fullList.length }}</span>
+          </div>
+          <ul class="map-full__items">
+            <li
+              v-for="c in fullList"
+              :key="c.id"
+              class="map-full__item"
+              @click="focusFromFull(c)"
+            >
+              <StatusBadge :status="c.status" />
+              <div class="map-full__item-main">
+                <strong>{{ c.customer_name }}</strong>
+                <span>{{ c.customer_code }} · {{ c.ip_address }} · {{ c.vpn_name || '-' }}</span>
+              </div>
+              <span v-if="c.latency_ms != null" class="map-full__ms">{{ c.latency_ms }} ms</span>
+            </li>
+            <li v-if="!fullList.length" class="map-full__empty">Tidak ada pelanggan</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="map-full__legend legend">
+        <div class="legend__item"><span class="legend__dot legend__dot--online" /> ONLINE</div>
+        <div class="legend__item"><span class="legend__dot legend__dot--offline" /> OFFLINE</div>
+        <div class="legend__item"><span class="legend__dot legend__dot--warning" /> WARNING</div>
+      </div>
+    </div>
+
+    <div v-if="showAddModal" class="modal-mask" :class="{ 'modal-mask--top': mapExpanded }" @click.self="cancelAdd">
       <div class="modal modal--sm">
         <h3>Tambah Pelanggan</h3>
         <p v-if="draft" class="modal__coord">
@@ -339,5 +555,219 @@ onMounted(load)
   padding: 8px 10px;
   color: var(--text-faint);
   font-size: 13px;
+}
+
+.map-expand {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 900;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.modal-mask--top {
+  z-index: 3100;
+}
+
+.map-expand:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.map-expand svg {
+  width: 16px;
+  height: 16px;
+}
+
+.map-full {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: var(--bg);
+}
+
+.map-full__top {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  z-index: 1500;
+  pointer-events: none;
+}
+
+.map-full :deep(.leaflet-top.leaflet-left .leaflet-control-zoom) {
+  margin-top: 56px;
+}
+
+.map-full__back {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(22, 33, 58, 0.92);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.map-full__back:hover {
+  background: var(--bg-hover);
+}
+
+.map-full__panel {
+  pointer-events: auto;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 80px);
+  background: rgba(22, 33, 58, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-full__area {
+  pointer-events: auto;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.map-full__area-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+}
+
+.map-full__search-wrap {
+  position: relative;
+  padding: 10px 10px 6px;
+}
+
+.map-full__list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.map-full__count {
+  background: var(--bg-panel-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: var(--text-dim);
+}
+
+.map-full__items {
+  list-style: none;
+  margin: 0;
+  padding: 4px 6px 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.map-full__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.map-full__item:hover {
+  background: var(--bg-hover);
+}
+
+.map-full__item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-full__item-main strong {
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-full__item-main span {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-full__ms {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.map-full__empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.map-full__legend {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+}
+
+@media (max-width: 640px) {
+  .map-full__top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .map-full__back {
+    align-self: flex-start;
+  }
+
+  .map-full__area {
+    width: 100%;
+  }
+
+  .map-full__area-wrap {
+    max-width: none;
+  }
+
+  .map-full__panel {
+    width: 100%;
+    max-width: none;
+    max-height: 45vh;
+  }
 }
 </style>

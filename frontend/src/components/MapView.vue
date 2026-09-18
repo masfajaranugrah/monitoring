@@ -8,7 +8,8 @@ const props = defineProps({
   statusFilter: { type: String, default: 'ALL' },
   vpnFilter: { type: String, default: 'ALL' },
   clickToAdd: { type: Boolean, default: false },
-  draftPoint: { type: Object, default: null }
+  draftPoint: { type: Object, default: null },
+  initialView: { type: Object, default: null }
 })
 
 const emit = defineEmits(['open-detail', 'map-click'])
@@ -24,6 +25,35 @@ const STATUS_COLORS = {
   ONLINE: '#22c55e',
   OFFLINE: '#ef4444',
   WARNING: '#eab308'
+}
+
+const GOOGLE_TILES_OPTS = {
+  maxZoom: 20,
+  maxNativeZoom: 20,
+  subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+}
+
+const BASE_LAYERS = {
+  'Google Streets': L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+    ...GOOGLE_TILES_OPTS,
+    attribution: '&copy; Google'
+  }),
+  'Google Satelit': L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+    ...GOOGLE_TILES_OPTS,
+    attribution: '&copy; Google'
+  }),
+  'Google Hybrid': L.tileLayer('https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
+    ...GOOGLE_TILES_OPTS,
+    attribution: '&copy; Google'
+  }),
+  'Google Terrain': L.tileLayer('https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
+    ...GOOGLE_TILES_OPTS,
+    attribution: '&copy; Google'
+  }),
+  'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  })
 }
 
 const filtered = computed(() => {
@@ -169,19 +199,30 @@ function openCustomerFromWindow(id) {
   if (c) emit('open-detail', c)
 }
 
+function getView() {
+  if (!map) return { lat: -2.5, lng: 118, zoom: 5 }
+  const c = map.getCenter()
+  return { lat: c.lat, lng: c.lng, zoom: map.getZoom() }
+}
+
+let prevCustomerHandler = null
+
 onMounted(() => {
+  prevCustomerHandler = window.__fmCustomer
   window.__fmCustomer = openCustomerFromWindow
 
+  const init = props.initialView
   map = L.map(mapEl.value, {
-    center: [-2.5, 118],
-    zoom: 5,
+    center: init && init.lat != null && init.lng != null ? [init.lat, init.lng] : [-2.5, 118],
+    zoom: init && init.zoom ? init.zoom : 5,
     zoomControl: true
   })
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-  }).addTo(map)
+  L.control
+    .layers(BASE_LAYERS, null, { position: 'bottomright', collapsed: false })
+    .addTo(map)
+
+  BASE_LAYERS['OpenStreetMap'].addTo(map)
 
   markers = L.markerClusterGroup({ disableClusteringAtZoom: 10, chunkedLoading: true })
   map.addLayer(markers)
@@ -191,7 +232,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (window.__fmCustomer === openCustomerFromWindow) delete window.__fmCustomer
+  if (window.__fmCustomer === openCustomerFromWindow) {
+    window.__fmCustomer = prevCustomerHandler
+  }
   if (map) {
     map.off('click', onMapClick)
     map.remove()
@@ -206,7 +249,7 @@ onUnmounted(() => {
 watch(filtered, () => rebuildMarkers(), { deep: true })
 watch(() => props.draftPoint, renderDraft)
 
-defineExpose({ focusCustomer, flyTo })
+defineExpose({ focusCustomer, flyTo, getView })
 </script>
 
 <template>

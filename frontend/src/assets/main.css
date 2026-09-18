@@ -260,6 +260,19 @@ button { font-family: inherit; }
 .legend__dot--offline { background: var(--red); }
 .legend__dot--warning { background: var(--yellow); }
 
+/* Leaflet basemap switcher (dark) */
+.leaflet-control-layers {
+  background: rgba(17, 26, 46, 0.92) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
+  color: var(--text);
+}
+.leaflet-control-layers-expanded { padding: 10px 12px !important; }
+.leaflet-control-layers label { font-size: 12px !important; }
+.leaflet-control-layers-separator { border-top: 1px solid var(--border) !important; }
+.leaflet-control-layers input { margin-right: 6px !important; }
+
 /* Map markers (divIcon) */
 .map-marker {
   --marker-color: #94a3b8;

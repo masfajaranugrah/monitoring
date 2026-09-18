@@ -1,15 +1,30 @@
 import { useMonitorStore } from '../stores/monitor'
 import { useAuthStore } from '../stores/auth'
+import { playOfflineBell } from './sound'
 
 let source = null
 let retryTimer = null
+
+const customerStatus = new Map()
 
 function handleEvent(eventName) {
   return (e) => {
     const store = useMonitorStore()
     try {
       const data = JSON.parse(e.data)
-      store.lastEvent = { event: eventName, data }
+      const event = { event: eventName, data }
+      store.lastEvent = event
+
+      if (eventName === 'customer:update') {
+        const { customer_id, status } = data || {}
+        if (customer_id != null && status) {
+          const prev = customerStatus.get(customer_id)
+          if (prev && prev !== 'OFFLINE' && status === 'OFFLINE') {
+            playOfflineBell()
+          }
+          customerStatus.set(customer_id, status)
+        }
+      }
     } catch (err) {
       console.error('bad sse payload', err)
     }
