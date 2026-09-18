@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,6 +24,27 @@ func validateIP(ip string) bool {
 
 func validateCoord(lat, lng float64) bool {
 	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+}
+
+func generateCustomerCode(ip string) string {
+	replacer := strings.NewReplacer(".", "-", ":", "-", " ", "")
+	return "CO-" + replacer.Replace(ip)
+}
+
+func uniqueCustomerCode(ctx context.Context, base string) string {
+	code := base
+	for i := 2; i <= 100; i++ {
+		var exists bool
+		if err := database.Pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM customers WHERE customer_code = $1)`, code).Scan(&exists); err != nil {
+			return code
+		}
+		if !exists {
+			return code
+		}
+		code = fmt.Sprintf("%s-%d", base, i)
+	}
+	return fmt.Sprintf("%s-%d", base, time.Now().UnixNano())
 }
 
 func ListCustomers(c *gin.Context) {
@@ -191,6 +214,9 @@ func CreateCustomer(c *gin.Context) {
 	}
 
 	var id int64
+	if strings.TrimSpace(input.CustomerCode) == "" {
+		input.CustomerCode = uniqueCustomerCode(ctx, generateCustomerCode(input.IPAddress))
+	}
 	err := database.Pool.QueryRow(ctx,
 		`INSERT INTO customers
 		 (customer_code, customer_name, ip_address, latitude, longitude, location,

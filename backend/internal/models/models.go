@@ -136,7 +136,7 @@ type DashboardStats struct {
 }
 
 type CustomerCreateInput struct {
-	CustomerCode      string   `json:"customer_code" binding:"required"`
+	CustomerCode      string   `json:"customer_code"`
 	CustomerName      string   `json:"customer_name" binding:"required"`
 	IPAddress         string   `json:"ip_address" binding:"required"`
 	Latitude          float64  `json:"latitude" binding:"required"`

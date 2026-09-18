@@ -1,22 +1,43 @@
 # Setup Database Fiber Monitor
 
-PostgreSQL 16 + PostGIS 3.4 via Docker. Migrasi dan seed admin otomatis saat backend pertama kali start.
+PostgreSQL 16 + PostGIS. Migrasi dan seed admin otomatis saat backend pertama kali start.
+Deployment memakai **PM2 tanpa Docker** — lihat [`DEPLOY-PM2.md`](DEPLOY-PM2.md).
 
 ---
 
-## Cepat (Docker — recommended)
+## Install PostgreSQL + PostGIS
 
 ```bash
-cd /opt/fiber-monitor
-cp .env.example .env   # edit .env kalau belum
-docker compose up -d --build
+sudo apt update
+sudo apt install -y postgresql postgresql-contrib postgis
+
+# Cek versi
+psql --version
 ```
 
-Itu saja. Database akan:
-1. Start PostgreSQL + PostGIS container
-2. Buat database `fiber_monitor`
-3. Backend otomatis jalankan migrasi (buat tabel, enum, index)
-4. Backend otomatis buat admin user dari `.env`
+### Buat user & database
+
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE USER fiber_monitor WITH PASSWORD 'GANTI_PASSWORD_KUAT';
+CREATE DATABASE fiber_monitor OWNER fiber_monitor;
+\c fiber_monitor
+CREATE EXTENSION IF NOT EXISTS postgis;
+GRANT ALL PRIVILEGES ON DATABASE fiber_monitor TO fiber_monitor;
+SQL
+```
+
+### Set `.env`
+
+```ini
+DATABASE_URL=postgres://fiber_monitor:GANTI_PASSWORD_KUAT@localhost:5432/fiber_monitor?sslmode=disable
+```
+
+Saat backend start, otomatis:
+
+1. Konek ke database `fiber_monitor`
+2. Jalankan migrasi (tabel, enum, index)
+3. Buat admin user dari `.env`
 
 ---
 
@@ -68,17 +89,17 @@ ADMIN_INITIAL_PASSWORD=admin123
 ## Cek status database
 
 ```bash
-# Cek container
-docker compose ps db
+# Service aktif?
+systemctl status postgresql
 
-# Cek koneksi
-docker compose exec db pg_isready -U monitor
+# Koneksi siap?
+pg_isready -h localhost -p 5432
 
 # Lihat tabel
-docker compose exec db psql -U monitor -d fiber_monitor -c "\dt"
+psql "$DATABASE_URL" -c "\dt"
 
 # Lihat jumlah data
-docker compose exec db psql -U monitor -d fiber_monitor -c "
+psql "$DATABASE_URL" -c "
 SELECT 'users' as tbl, count(*) FROM users
 UNION ALL SELECT 'vpn_connections', count(*) FROM vpn_connections
 UNION ALL SELECT 'customers', count(*) FROM customers
@@ -91,11 +112,10 @@ UNION ALL SELECT 'alerts', count(*) FROM alerts;
 
 ## Load sample data (opsional)
 
-Untuk testing, ada file sample data yang berisi VPN dummy dan 10 pelanggan contoh:
+Untuk testing, ada file sample data berisi VPN dummy dan 10 pelanggan contoh:
 
 ```bash
-docker compose exec -T db psql -U monitor -d fiber_monitor \
-  < backend/migrations/sample_data.sql
+psql "$DATABASE_URL" -f backend/migrations/sample_data.sql
 ```
 
 Data yang diinsert:
@@ -104,55 +124,30 @@ Data yang diinsert:
 
 ---
 
-## Manual setup (tanpa Docker)
-
-Kalau mau install PostgreSQL langsung di server:
-
-```bash
-# Install PostgreSQL 15 + PostGIS
-sudo apt install -y postgresql postgresql-contrib postgis postgresql-15-postgis-3
-
-# Buat user & database
-sudo -u postgres psql -c "CREATE USER monitor WITH PASSWORD 'monitor123';"
-sudo -u postgres psql -c "CREATE DATABASE fiber_monitor OWNER monitor;"
-sudo -u postgres psql -d fiber_monitor -c "CREATE EXTENSION postgis;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE fiber_monitor TO monitor;"
-```
-
-Setelah itu edit `.env`:
-
-```
-DATABASE_URL=postgres://monitor:monitor123@localhost:5432/fiber_monitor?sslmode=disable
-```
-
-Migrasi tetap otomatis jalan saat backend start.
-
----
-
 ## Backup & Restore
 
 ### Backup
 
 ```bash
-docker compose exec -T db pg_dump -U monitor fiber_monitor > backup_$(date +%Y%m%d_%H%M%S).sql
+pg_dump "$DATABASE_URL" > backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
 ### Backup compressed
 
 ```bash
-docker compose exec -T db pg_dump -U monitor fiber_monitor | gzip > backup_$(date +%Y%m%d_%H%M%S).sql.gz
+pg_dump "$DATABASE_URL" | gzip > backup_$(date +%Y%m%d_%H%M%S).sql.gz
 ```
 
 ### Restore
 
 ```bash
-cat backup_20260915.sql | docker compose exec -T db psql -U monitor -d fiber_monitor
+psql "$DATABASE_URL" < backup_20260915.sql
 ```
 
 ### Restore compressed
 
 ```bash
-gunzip -c backup_20260915.sql.gz | docker compose exec -T db psql -U monitor -d fiber_monitor
+gunzip -c backup_20260915.sql.gz | psql "$DATABASE_URL"
 ```
 
 ### Auto backup (cron)
@@ -164,7 +159,7 @@ sudo crontab -e
 Tambah baris ini (backup setiap jam 2 malam):
 
 ```
-0 2 * * * cd /opt/fiber-monitor && docker compose exec -T db pg_dump -U monitor fiber_monitor | gzip > /var/backups/fiber-monitor_$(date +\%Y\%m\%d).sql.gz 2>/dev/null
+0 2 * * * pg_dump "postgres://fiber_monitor:PASSWORD@localhost:5432/fiber_monitor" | gzip > /var/backups/fiber-monitor_$(date +\%Y\%m\%d).sql.gz 2>/dev/null
 ```
 
 Buat folder backup:
@@ -179,20 +174,23 @@ sudo mkdir -p /var/backups
 
 | Masalah | Solusi |
 |---|---|
-| `FATAL: password authentication failed` | Cek `POSTGRES_PASSWORD` di `.env` cocok |
-| `database "fiber_monitor" does not exist` | Restart backend: `docker compose restart backend` |
-| `connection refused` | DB belum ready, tunggu atau cek: `docker compose ps` |
-| `relation "users" does not exist` | Migrasi belum jalan, cek log backend: `docker compose logs backend` |
-| `permission denied for table` | Run: `sudo -u postgres psql -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO monitor;"` |
-| `PostGIS extension not found` | Pastikan image `postgis/postgis:16-3.4`, bukan `postgres:16` |
-| Container DB restart loop | Cek log: `docker compose logs db` — biasanya disk full atau corrupt volume |
+| `FATAL: password authentication failed` | Cek `DATABASE_URL` di `.env` cocok dengan user/password PostgreSQL |
+| `database "fiber_monitor" does not exist` | Buat ulang database (lihat atas) lalu restart: `pm2 restart fiber-monitor` |
+| `connection refused` | Pastikan `systemctl start postgresql` berjalan |
+| `relation "users" does not exist` | Migrasi belum jalan, cek log: `pm2 logs fiber-monitor` |
+| `permission denied for table` | `sudo -u postgres psql -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO fiber_monitor;"` |
+| `PostGIS extension not found` | `sudo -u postgres psql -d fiber_monitor -c "CREATE EXTENSION postgis;"` |
 
 ### Reset database (fresh start)
 
 **HATI-HATI: hapus semua data!**
 
 ```bash
-docker compose down
-docker volume rm monitoring_pgdata
-docker compose up -d --build
+sudo -u postgres psql <<'SQL'
+DROP DATABASE fiber_monitor;
+CREATE DATABASE fiber_monitor OWNER fiber_monitor;
+\c fiber_monitor
+CREATE EXTENSION IF NOT EXISTS postgis;
+SQL
+pm2 restart fiber-monitor
 ```

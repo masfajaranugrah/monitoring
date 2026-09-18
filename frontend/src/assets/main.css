@@ -205,14 +205,22 @@ button { font-family: inherit; }
 .lat-hint--fail { background: var(--bg-panel-2); color: var(--text-faint); }
 
 /* ---------- Filters ---------- */
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: calc(100vh - 121px);
+  min-height: 520px;
+}
 .dashboard__controls {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 10px 14px;
-  margin-bottom: 14px;
+  flex-shrink: 0;
 }
+.dashboard__hint { color: var(--text-faint); font-size: 12px; }
 .filter-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .filter-group__label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
 .filter-chip {
@@ -226,8 +234,17 @@ button { font-family: inherit; }
 .filter-chip--active.filter-chip--warning { background: var(--yellow); color: #1e293b; }
 .filter-chip--active.filter-chip--all { background: var(--primary); }
 
-.dashboard__map { position: relative; height: calc(100vh - 250px); min-height: 420px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
+.dashboard__map { position: relative; flex: 1; min-height: 420px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
+.monitor-map-wrap { position: relative; height: 100%; width: 100%; }
 .monitor-map { height: 100%; width: 100%; }
+.monitor-map--clickable { cursor: crosshair; }
+.monitor-map__error {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  background: var(--bg-panel); color: var(--text-dim); text-align: center; padding: 24px;
+}
+.monitor-map__error strong { color: var(--text); }
+.monitor-map__error code { background: var(--bg-panel-2); padding: 1px 6px; border-radius: 5px; }
 .mapmon__map { position: relative; min-height: 480px; flex: 1; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 
 .legend {
@@ -251,6 +268,12 @@ button { font-family: inherit; }
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--marker-color) 30%, transparent), 0 2px 6px rgba(0,0,0,0.4);
 }
 .map-marker__inner { display: none; }
+.map-marker--draft {
+  --marker-color: var(--primary);
+  background: var(--primary);
+  border: 2px solid #fff;
+  animation: marker-pulse 1.4s infinite;
+}
 .map-marker--pulse { animation: marker-pulse 1.4s infinite; }
 @keyframes marker-pulse {
   0% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--marker-color) 35%, transparent), 0 2px 6px rgba(0,0,0,0.4); }
@@ -277,6 +300,13 @@ button { font-family: inherit; }
   background: var(--primary); color: #fff; border: none;
   padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
 }
+
+/* Google Maps InfoWindow (latar putih) */
+.gm-style .map-popup { color: #1e293b; }
+.gm-style .map-popup__head strong { color: #0f172a; }
+.gm-style .map-popup__code { color: #64748b; }
+.gm-style .map-popup__table td { color: #64748b; }
+.gm-style .map-popup__table td:last-child { color: #1e293b; }
 
 /* ---------- Map monitoring page ---------- */
 .mapmon { display: flex; flex-direction: column; gap: 12px; height: 100%; }
@@ -359,9 +389,11 @@ button { font-family: inherit; }
 }
 .modal--sm { max-width: 420px; }
 .modal h3 { margin: 0 0 16px; }
+.modal__coord { margin: 0 0 14px; color: var(--text-dim); font-size: 12px; font-family: "SF Mono", Menlo, monospace; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-grid--single { grid-template-columns: 1fr; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field span { font-size: 11px; color: var(--text-dim); }
 .field input, .field select {
@@ -496,6 +528,7 @@ button { font-family: inherit; }
   .app-content { padding: 10px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .stat-card__value { font-size: 24px; }
-  .dashboard__map { height: 420px; }
+  .dashboard { height: auto; }
+  .dashboard__map { min-height: 420px; }
   .crud__count { display: none; }
 }

@@ -88,7 +88,7 @@ monitoring/
 ├── frontend/
 │   ├── src/
 │   │   ├── views/                # Dashboard, Map, Customers, Detail, VPN, History, Alerts, Settings, Login
-│   │   ├── components/           # MapView, StatsCards, Sidebar, TopBar, badges, chart
+│   │   ├── components/           # MapView (Leaflet), Sidebar, TopBar, badges, chart
 │   │   ├── stores/               # Pinia (auth, monitor)
 │   │   ├── api/                  # axios client
 │   │   ├── services/             # SSE realtime client
@@ -97,8 +97,8 @@ monitoring/
 │   └── vite.config.js
 ├── nginx/fiber-monitor.conf
 ├── deployment/fiber-monitor.service
-├── docker-compose.yml
-├── Dockerfile
+├── ecosystem.config.cjs          # konfigurasi PM2
+├── DEPLOY-PM2.md                 # panduan deploy tanpa Docker
 ├── Makefile
 ├── .env.example
 └── README.md
@@ -109,37 +109,51 @@ monitoring/
 ## Prasyarat (Server)
 
 ```
-Debian 12, akses root, koneksi internet
-PostgreSQL 15+ dengan PostGIS (untuk non-docker)
-Go 1.22+ (build), Node 20+ (build frontend), Nginx
+Debian 12 / Ubuntu 20.04+, akses root, koneksi internet
+PostgreSQL 15+ dengan PostGIS
+Go 1.22+ (build), Node 20+ (build frontend), PM2, Nginx
 Klien VPN: xl2tpd (L2TP), sstp-client (SSTP)
 ```
 
 ---
 
-## Instalasi — Docker Compose (cepat)
+## Instalasi — PM2 (tanpa Docker)
+
+Panduan lengkap: [`DEPLOY-PM2.md`](DEPLOY-PM2.md). Ringkasnya:
 
 ```bash
 git clone <url-repo> fiber-monitor && cd fiber-monitor
 
-# 1. Siapkan environment
+# 1. Environment
 cp .env.example .env
-#   ubah JWT_SECRET & ENCRYPTION_KEY sembarang panjang acak
-#   openssl rand -base64 48   → JWT_SECRET
-#   openssl rand -base64 32   → ENCRYPTION_KEY
+#   isi DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY
+#   openssl rand -base64 48   → JWT_SECRET / ENCRYPTION_KEY
 
-# 2. Jalankan
-docker compose up -d --build
+# 2. Build backend + frontend, lalu salin SPA ke web/
+make build
+make sync-dist
+
+# 3. Jalankan dengan PM2
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup systemd   # agar otomatis start setelah reboot
 ```
 
 Akses: `http://SERVER_IP:8080` — login `admin` / `admin123` (ubah setelah login).
 
-> Catatan VPN di Docker: container backend perlu `NET_ADMIN` dan `NET_RAW`
-> (sudah diatur di docker-compose.yml) serta akses `/etc/ppp`.
+> Peta memakai Leaflet + OpenStreetMap (gratis, tanpa API key).
+> Tidak perlu konfigurasi tambahan saat build.
+
+**Catatan penting:**
+- Backend Go melayani REST API **dan** SPA, cukup satu proses PM2.
+- Monitoring engine tetap berjalan walau browser ditutup.
+- ICMP ping / VPN butuh root atau `cap_net_raw,cap_net_admin`; jalankan PM2 sebagai
+  root atau `sudo setcap cap_net_raw,cap_net_admin+eip bin/fiber-monitor-server`.
+- Deploy ulang cukup: `make deploy`.
 
 ---
 
-## Instalasi — Debian 12 (tanpa Docker)
+## Instalasi — Manual (Go native)
 
 ```bash
 # 1. Prasyarat
@@ -153,40 +167,25 @@ CREATE DATABASE fiber_monitor OWNER monitor;
 CREATE EXTENSION IF NOT EXISTS postgis;
 SQL
 
-# 3. Deploy
-sudo mkdir -p /opt/fiber-monitor
-sudo chown $USER /opt/fiber-monitor
-cp -r backend /opt/fiber-monitor/backend
-cp -r frontend /opt/fiber-monitor/frontend
-cp .env.example /opt/fiber-monitor/.env
-cd /opt/fiber-monitor
+# 3. Build
+cp .env.example .env
+#   edit DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY
+make build
+make sync-dist
 
-# 4. Build backend
-cd backend && go mod download && go build -o ../fiber-monitor-server ./cmd/server && cd ..
-
-# 5. Build frontend
-cd frontend && npm ci && npm run build && cd ..
-mkdir -p web && cp -r frontend/dist/* web/
-
-# 6. Edit .env — sesuaikan DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY
-
-# 7. Systemd service
-sudo cp deployment/fiber-monitor.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now fiber-monitor
+# 4. Jalankan
+./bin/fiber-monitor-server
 curl http://127.0.0.1:8080/health   # cek
 
-# 8. Nginx reverse proxy
+# 5. Nginx reverse proxy
 sudo cp nginx/fiber-monitor.conf /etc/nginx/sites-available/fiber-monitor
 sudo ln -s /etc/nginx/sites-available/fiber-monitor /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
 **Catatan penting:**
-- Monitoring engine berjalan sebagai `fiber-monitor.service` → tetap berjalan walau browser ditutup.
-- ICMP ping membutuhkan root / `cap_net_raw`. Service dijalankan sebagai `root` (atau set
-  `cap_net_raw=+ep` pada binary untuk keamanan lebih baik).
-- Untuk VPN tunnel, akun/service perlu membuat interface (root) dan privilese `NET_ADMIN`.
+- ICMP ping membutuhkan root / `cap_net_raw` (atau fallback ke binary `ping` sistem).
+- Untuk VPN tunnel, proses perlu membuat interface (root) dan privilese `NET_ADMIN`.
 
 ---
 
@@ -194,11 +193,13 @@ sudo nginx -t && sudo systemctl reload nginx
 
 1. Login → buat **VPN** (`/vpn`): Nama, Tipe (L2TP/SSTP), Server, Username, Password.
    Tekan **Test** untuk memverifikasi koneksi tunnel.
-2. Tambah **Pelanggan** (`/customers`): kode, nama, IP, latitude/longitude, VPN, interval ping.
-   Koordinat divalidasi server (–90..90 / –180..180) dan IP juga divalidasi.
-3. Dashboard `/dashboard`: statistik (TOTAL/ONLINE/OFFLINE/WARNING/VPN) + peta besar.
-   Marker **hijau** online, **merah** offline, **kuning** warning. Klik marker → popup detail → halaman detail.
-4. `/map`: peta penuh + daftar pelanggan + search + filter status/VPN. Klik item daftar → peta fokus.
+2. **Dashboard** `/dashboard`: peta (Leaflet + OpenStreetMap) penuh. **Klik titik di peta** → muncul modal,
+   isi **Nama** + **IP** saja (koordinat terisi otomatis). Marker **hijau** online,
+   **merah** offline, **kuning** warning. Klik marker → popup detail → halaman detail.
+3. Tambah/kelola **Pelanggan** (`/customers`): CRUD lengkap, kode, nama, IP,
+   latitude/longitude, VPN, interval ping. IP & koordinat divalidasi server.
+   Kode pelanggan boleh dikosongkan → digenerate otomatis dari IP (mis. `CO-10-10-10-55`).
+4. `/map`: peta + daftar pelanggan + search + filter status/VPN. Klik item daftar → peta fokus.
 5. Halaman **Ping History**, **Alerts**, dan **Settings** tersedia di sidebar.
 
 ---
@@ -241,6 +242,9 @@ GET /api/customers?search=budi&status=ONLINE&vpn_id=1&sort_by=latency&sort_order
 
 Return: `{ data, total, page, page_size, pages }`
 
+> `POST /api/customers` — field `customer_code` **opsional**. Jika dikosongkan, server
+> akan generate kode dari IP pelanggan (mis. `CO-10-10-10-55`) dan memastikan unik.
+
 ---
 
 ## Realtime (SSE)
@@ -270,6 +274,7 @@ Lihat `.env.example`. Variabel utama:
 | `PING_CONCURRENCY` | 30 | Worker ping paralel |
 | `PING_HISTORY_RETENTION_DAYS` | 7 | Retensi riwayat ping |
 | `ADMIN_INITIAL_USERNAME/PASSWORD` | admin/admin123 | Admin pertama |
+| `VITE_GOOGLE_MAPS_API_KEY` | – | Opsional, hanya jika memakai varian peta Google Maps |
 
 ---
 
@@ -277,7 +282,7 @@ Lihat `.env.example`. Variabel utama:
 
 - **Worker pool**: ping paralel 30 worker (configurable) — tidak ada blocking.
 - **Queue**: channel berisi kerja; interval per pelanggan dijadwalkan scheduler.
-- **Peta**: Leaflet marker cluster — tidak ribuan marker individual di zoom rendah.
+- **Peta**: Leaflet marker clustering — tidak ribuan marker individual di zoom rendah.
 - **History**: `ping_results` terindeks `(customer_id, pinged_at DESC)`; cleanup otomatis.
   Untuk skala besar gunakan partisi waktu:
   ```sql

@@ -1,9 +1,7 @@
 # Panduan Instalasi Fiber Monitor
 
-Terdapat dua cara instalasi:
-
-1. **Docker Compose** (cepat, direkomendasikan untuk pengujian)
-2. **Debian 12 native** (produksi, VPN tunnel langsung di host)
+Deployment **tanpa Docker**, memakai **PM2** sebagai process manager.
+Panduan produksi lengkap: [`../DEPLOY-PM2.md`](../DEPLOY-PM2.md).
 
 ---
 
@@ -16,55 +14,37 @@ git clone <url-repo> fiber-monitor && cd fiber-monitor
 cp .env.example .env
 ```
 
-Edit `.env` — **wajib** mengganti dua kunci berikut sebelum production:
+Edit `.env` — **wajib** mengganti kunci berikut sebelum production:
 
 ```bash
-# Generate secret:
 openssl rand -base64 48      # untuk JWT_SECRET
-openssl rand -base64 32      # untuk ENCRYPTION_KEY
+openssl rand -base64 48      # untuk ENCRYPTION_KEY
 ```
 
 Contoh:
 
 ```ini
+DATABASE_URL=postgres://fiber_monitor:PASSWORD@localhost:5432/fiber_monitor?sslmode=disable
 JWT_SECRET=k0TnRj... (hasil openssl)
 ENCRYPTION_KEY=x7Q1Pm... (hasil openssl)
 ```
 
 ---
 
-## Opsi A — Docker Compose
-
-Prasyarat: Docker Engine + Docker Compose plugin.
-
-```bash
-docker compose up -d --build
-docker compose ps          # cek status
-docker compose logs -f backend
-```
-
-Selesai — akses `http://SERVER_IP:8080`.
-
-**Keunggulan**:
-- PostgreSQL + PostGIS, backend, dan frontend otomatis.
-- Database persist di volume `pgdata`.
-
-**Catatan VPN**: container diberi `NET_ADMIN` + `NET_RAW` sehingga ping & tunnel berjalan.
-
----
-
-## Opsi B — Debian 12 native
+## Opsi A — PM2 (direkomendasikan)
 
 ### 1. Install dependensi sistem
 
 ```bash
 sudo apt update
 sudo apt install -y \
-  postgresql postgis postgresql-15-postgis-3 \
+  postgresql postgresql-contrib postgis \
   nginx curl \
   golang-go nodejs npm \
   xl2tpd sstp-client iputils-ping \
   build-essential
+
+sudo npm install -g pm2
 ```
 
 Versi Go/Node yang disarankan: Go ≥ 1.22, Node ≥ 20.
@@ -76,66 +56,51 @@ Jika repo Debian terlalu lama, gunakan:
 
 ```bash
 sudo -u postgres psql <<'SQL'
-CREATE USER monitor WITH PASSWORD 'monitor123';
-CREATE DATABASE fiber_monitor OWNER monitor;
+CREATE USER fiber_monitor WITH PASSWORD 'GANTI_PASSWORD_KUAT';
+CREATE DATABASE fiber_monitor OWNER fiber_monitor;
 \c fiber_monitor
 CREATE EXTENSION IF NOT EXISTS postgis;
 SQL
 ```
 
-### 3. Letakkan source & build
+### 3. Build
 
 ```bash
-sudo mkdir -p /opt/fiber-monitor
-sudo chown $(whoami) /opt/fiber-monitor
-cp -r backend frontend .env.example Makefile /opt/fiber-monitor/
-cd /opt/fiber-monitor
-cp .env.example .env
-
-# build backend
-cd backend
-go mod download
-go build -o ../fiber-monitor-server ./cmd/server
-cd ..
-
-# build frontend
-cd frontend
-npm ci
-npm run build
-cd ..
-mkdir -p web && cp -r frontend/dist/* web/
+make build          # backend -> bin/, frontend -> frontend/dist
+make sync-dist      # SPA -> web/ (diserve oleh backend Go)
 ```
 
-### 4. Konfigurasi `.env`
-
-```ini
-DATABASE_URL=postgres://monitor:monitor123@localhost:5432/fiber_monitor?sslmode=disable
-JWT_SECRET=<acak48>
-ENCRYPTION_KEY=<acak32>
-ADMIN_INITIAL_USERNAME=admin
-ADMIN_INITIAL_PASSWORD=<password-admin-yang-kuat>
-```
-
-### 5. Jalankan sebagai systemd service
+### 4. Jalankan dengan PM2
 
 ```bash
-sudo cp /opt/fiber-monitor/deployment/fiber-monitor.service /etc/systemd/system/fiber-monitor.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now fiber-monitor
-sudo systemctl status fiber-monitor
-curl http://127.0.0.1:8080/health
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup systemd   # ikuti perintah sudo yang dicetak
 ```
 
-### 6. Nginx reverse proxy
+### 5. Nginx reverse proxy
 
 ```bash
-sudo cp /opt/fiber-monitor/nginx/fiber-monitor.conf /etc/nginx/sites-available/fiber-monitor
+sudo cp nginx/fiber-monitor.conf /etc/nginx/sites-available/fiber-monitor
 sudo ln -s /etc/nginx/sites-available/fiber-monitor /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Akses `http://SERVER_IP` (port 80).
+Akses `http://SERVER_IP` (port 80) atau `http://SERVER_IP:8080` langsung.
+
+---
+
+## Opsi B — Manual (Go native)
+
+Sama seperti Opsi A tetapi menjalankan binary langsung tanpa PM2:
+
+```bash
+make build && make sync-dist
+./bin/fiber-monitor-server
+```
+
+Untuk produksi tetap disarankan PM2/systemd agar otomatis restart.
 
 ---
 
@@ -144,7 +109,7 @@ Akses `http://SERVER_IP` (port 80).
 1. `curl http://127.0.0.1:8080/health` → `{"status":"ok","monitor":true}`
 2. Login web `admin` / password dari `.env`.
 3. Menu **VPN Connections** → Tambah VPN → Test.
-4. Menu **Customers** → Tambah pelanggan → cek marker di map.
+4. Dashboard → **klik peta** untuk menambah pelanggan (nama + IP) atau lewat menu **Customers**.
 5. Matikan salah satu perangkat pelanggan → dalam beberapa interval status berubah
    ONLINE → WARNING → OFFLINE secara otomatis dan muncul alert.
 
@@ -160,8 +125,9 @@ psql "$DATABASE_URL" -f backend/migrations/sample_data.sql
 
 | Gejala | Solusi |
 |---|---|
-| `ping: socket: Operation not permitted` | Jalankan service sebagai root / tambahkan `cap_net_raw=+ep` pada binary |
-| VPN tidak konek | Pastikan `xl2tpd`/`sstp-client` terinstal; cek log `journalctl -u fiber-monitor` |
+| Peta tidak tampil | Pastikan akses ke `tile.openstreetmap.org` tidak diblokir firewall server |
+| `ping: socket: Operation not permitted` | Jalankan PM2 sebagai root / tambahkan `cap_net_raw` pada binary |
+| VPN tidak konek | Pastikan `xl2tpd`/`sstp-client` terinstal; cek `pm2 logs fiber-monitor` |
 | Login 401 setelah upgrade | Token lama kadaluarsa; `JWT_SECRET` berubah → logout semua |
 | SSE terputus | Pastikan nginx `proxy_buffering off` pada `/api/events` |
 | Koneksi DB ditolak | Sesuaikan `DATABASE_URL`; pastikan `pg_hba.conf` mengizinkan host |
