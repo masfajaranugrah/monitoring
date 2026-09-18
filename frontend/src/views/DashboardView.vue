@@ -64,7 +64,7 @@ const statuses = ['ALL', 'ONLINE', 'OFFLINE', 'WARNING']
 
 const draft = ref(null)
 const showAddModal = ref(false)
-const addForm = ref({ customer_name: '', ip_address: '' })
+const addForm = ref({ customer_name: '', ip_address: '', vpn_id: '' })
 const saving = ref(false)
 const addError = ref('')
 
@@ -87,7 +87,7 @@ function openDetail(customer) {
 
 function onMapClick(pt) {
   draft.value = { lat: pt.lat, lng: pt.lng }
-  addForm.value = { customer_name: '', ip_address: '' }
+  addForm.value = { customer_name: '', ip_address: '', vpn_id: '' }
   addError.value = ''
   showAddModal.value = true
 }
@@ -105,6 +105,7 @@ async function saveCustomer() {
     await api.post('/customers', {
       customer_name: addForm.value.customer_name,
       ip_address: addForm.value.ip_address,
+      vpn_id: addForm.value.vpn_id ? Number(addForm.value.vpn_id) : null,
       latitude: draft.value.lat,
       longitude: draft.value.lng,
       monitoring_enabled: true,
@@ -244,6 +245,14 @@ onMounted(load)
             </label>
             <label class="field"><span>IP Address *</span>
               <input v-model="addForm.ip_address" placeholder="103.143.196.10" required />
+            </label>
+            <label class="field"><span>VPN (opsional)</span>
+              <select v-model="addForm.vpn_id">
+                <option value="">— Tanpa VPN (via default route) —</option>
+                <option v-for="v in monitor.vpns" :key="v.id" :value="v.id">
+                  {{ v.name }} <template v-if="v.interface_name">({{ v.interface_name }})</template>
+                </option>
+              </select>
             </label>
           </div>
           <p v-if="addError" class="login__error">{{ addError }}</p>

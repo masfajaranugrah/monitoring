@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,18 +40,24 @@ func (m *Manager) Connect(v *models.VPNConnection, password string) error {
 	defer m.mu.Unlock()
 
 	// Sudah hidup? jangan bunuh lalu connect ulang.
+	// Interface pppN bisa saja digunakan ulang oleh VPN lain, jadi hanya
+	// percaya jika IP-nya cocok dengan LocalIP yang kita tahu.
 	if v.InterfaceName != "" {
 		if ip, err := m.interfaceIP(v.InterfaceName); err == nil && ip != "" {
-			log.Printf("[vpn] %s already up on %s (%s), skipping connect", v.Name, v.InterfaceName, ip)
-			return nil
+			if v.LocalIP == "" || ip == v.LocalIP {
+				log.Printf("[vpn] %s already up on %s (%s), skipping connect", v.Name, v.InterfaceName, ip)
+				return nil
+			}
 		}
 	}
 
 	// Bersihkan instance lama dulu, agar nama pppN bisa dipakai ulang dan
 	// snapshot di bawah benar-benar mencerminkan kondisi sebelum connect.
+	// Tunggu beberapa detik agar server melepas sesi lama (one-session-per-user
+	// menolak login baru saat sesi lama masih hidup dengan pesan CHAP gagal).
 	if models.VpnType(v.VPNType) == models.VpnPPTP {
 		killPPTPInstance(linkToken(v.Name), v.ServerAddress)
-		time.Sleep(700 * time.Millisecond)
+		time.Sleep(3 * time.Second)
 	}
 	before := snapshotPPP()
 
@@ -67,6 +74,16 @@ func (m *Manager) Connect(v *models.VPNConnection, password string) error {
 	}
 	if err != nil {
 		return err
+	}
+
+	// Untuk PPTP, interface milik VPN ini dibaca dari logfile pppd miliknya
+	// sendiri (deterministik, tidak runaway mencuri nama pppN dari VPN lain).
+	if models.VpnType(v.VPNType) == models.VpnPPTP {
+		if iface, ok := m.waitForPPTPIface(linkToken(v.Name), 12*time.Second); ok {
+			v.InterfaceName = iface
+			log.Printf("[vpn] %s tunnel is up on %s", v.Name, iface)
+			return nil
+		}
 	}
 
 	if iface, ok := m.waitForNewPPP(before, 12*time.Second); ok {
@@ -143,6 +160,38 @@ func (m *Manager) waitForNewPPP(before map[string]bool, timeout time.Duration) (
 			if _, ok := parseIPorCIDR(fields[3]); ok {
 				return name, true
 			}
+		}
+	}
+	return "", false
+}
+
+func pptpLogPath(token string) string {
+	return "/var/log/pptp-" + token + ".log"
+}
+
+// waitForPPTPIface determines the ppp interface created by the pppd instance
+// that owns the per-VPN logfile. pppd prints "Using interface pppN" before
+// assigning an address; we wait until that interface actually has an IPv4
+// address so InterfaceName is only set once the tunnel is truly up. The
+// logfile is truncated before pppd starts, so the latest match is this run.
+var pptpIfaceRe = regexp.MustCompile(`Using interface (ppp\d+)`)
+
+func (m *Manager) waitForPPTPIface(token string, timeout time.Duration) (string, bool) {
+	path := pptpLogPath(token)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		matches := pptpIfaceRe.FindAllSubmatch(b, -1)
+		if len(matches) == 0 {
+			continue
+		}
+		name := string(matches[len(matches)-1][1])
+		if ip, err := m.interfaceIP(name); err == nil && ip != "" {
+			return name, true
 		}
 	}
 	return "", false
@@ -225,6 +274,8 @@ func (m *Manager) connectPPTP(v *models.VPNConnection, password string) error {
 // connectPPTPCmd uses the pptp binary from pptp-linux (simpler interface).
 func (m *Manager) connectPPTPCmd(v *models.VPNConnection, password string) error {
 	token := linkToken(v.Name)
+	logPath := pptpLogPath(token)
+	_ = os.Truncate(logPath, 0)
 	peerFile := "/etc/ppp/peers/pptp-" + token
 	opt := fmt.Sprintf(`pty "pptp %s --nolaunchpppd"
 name %s
@@ -247,7 +298,8 @@ mtu 1400
 mru 1400
 persist
 maxfail 0
-`, v.ServerAddress, v.Username, password)
+logfile %s
+`, v.ServerAddress, v.Username, password, logPath)
 	if err := os.MkdirAll("/etc/ppp/peers", 0o755); err != nil {
 		_ = os.WriteFile("/tmp/pptp-peer-"+token, []byte(opt), 0o600)
 		peerFile = "/tmp/pptp-peer-" + token
@@ -310,6 +362,14 @@ func (m *Manager) Disconnect(v *models.VPNConnection) {
 		killPPTPInstance(token, v.ServerAddress)
 	}
 	iface := m.interfaceName(v)
+	// Interface pppN bisa dipakai ulang oleh VPN lain setelah reconnect
+	// kacau; jangan hapus interface milik VPN lain. Bandingkan IP-nya.
+	if iface != "" && strings.HasPrefix(iface, "ppp") {
+		if ip, err := m.interfaceIP(iface); err == nil && v.LocalIP != "" && ip != v.LocalIP {
+			log.Printf("[vpn] disconnect %s: %s belongs to other tunnel (%s != %s), skipping interface removal", v.Name, iface, ip, v.LocalIP)
+			return
+		}
+	}
 	// Generic PPP disconnect: try ip link delete, then ifdown.
 	_ = exec.Command("ip", "link", "set", "dev", iface, "down").Run()
 	_ = exec.Command("ip", "link", "delete", "dev", iface).Run()
@@ -358,8 +418,9 @@ func (m *Manager) EnsureRoute(ip, iface string) {
 	if ip == "" || iface == "" {
 		return
 	}
-	if err := exec.Command("ip", "route", "replace", ip+"/32", "dev", iface).Run(); err != nil {
-		log.Printf("[vpn] route %s via %s failed: %v", ip, iface, err)
+	out, err := exec.Command("ip", "route", "replace", ip+"/32", "dev", iface).CombinedOutput()
+	if err != nil {
+		log.Printf("[vpn] route %s via %s failed: %v (%s)", ip, iface, err, strings.TrimSpace(string(out)))
 	}
 }
 

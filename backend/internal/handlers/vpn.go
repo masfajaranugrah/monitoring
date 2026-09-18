@@ -214,9 +214,13 @@ func (h *VPNHandler) SetActive(c *gin.Context) {
 	}
 
 	if !input.IsActive {
-		// Bring the tunnel down on deactivation.
+		// Bring the tunnel down on deactivation, and clear the stale
+		// interface mapping so a later re-enable reconnects cleanly.
 		if v, err := h.loadVPN(ctx, id); err == nil {
 			h.Manager.Disconnect(&v)
+			_, _ = database.Pool.Exec(ctx,
+				`UPDATE vpn_connections SET status='DISCONNECTED', latency_ms=NULL,
+				  local_ip='', interface_name='', updated_at=now() WHERE id=$1`, id)
 		}
 	}
 
@@ -284,7 +288,9 @@ func (h *VPNHandler) ConnectVPN(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	// Connect bisa makan waktu: jeda 3s pra-connect + tunggu tunnel 12s +
+	// polling 8s + test 3s. Beri cukup ruang agar persist DB tidak timeout.
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 35*time.Second)
 	defer cancel()
 
 	v, err := h.loadVPN(ctx, id)
@@ -382,7 +388,7 @@ func (h *VPNHandler) DisconnectVPN(c *gin.Context) {
 	status, _ := h.Manager.Status(&v)
 	_, _ = database.Pool.Exec(ctx,
 		`UPDATE vpn_connections SET status=$1, latency_ms=NULL, local_ip='',
-		  updated_at=now() WHERE id=$2`,
+		  interface_name='', updated_at=now() WHERE id=$2`,
 		status, id)
 
 	c.JSON(http.StatusOK, gin.H{
