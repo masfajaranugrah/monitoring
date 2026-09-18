@@ -31,6 +31,12 @@ func NewManager() *Manager {
 // stores its real name on the model (pppd names it pppN unless the installed
 // ppp version supports the ifname option, which is absent on Ubuntu 20.04).
 func (m *Manager) Connect(v *models.VPNConnection, password string) error {
+	// Bersihkan instance lama dulu, agar nama pppN bisa dipakai ulang dan
+	// snapshot di bawah benar-benar mencerminkan kondisi sebelum connect.
+	if models.VpnType(v.VPNType) == models.VpnPPTP {
+		killPPTPInstance(linkToken(v.Name), v.ServerAddress)
+		time.Sleep(700 * time.Millisecond)
+	}
 	before := listPPPInterfaces()
 
 	var err error
@@ -258,6 +264,10 @@ func (m *Manager) connectPPTPViaPPPD(v *models.VPNConnection, password string) e
 
 // Disconnect brings the tunnel interface down.
 func (m *Manager) Disconnect(v *models.VPNConnection) {
+	token := linkToken(v.Name)
+	if models.VpnType(v.VPNType) == models.VpnPPTP {
+		killPPTPInstance(token, v.ServerAddress)
+	}
 	iface := m.interfaceName(v)
 	// Generic PPP disconnect: try ip link delete, then ifdown.
 	_ = exec.Command("ip", "link", "set", "dev", iface, "down").Run()
@@ -308,6 +318,15 @@ func (m *Manager) SourceIP(v *models.VPNConnection) string {
 	iface := m.interfaceName(v)
 	ip, _ := m.interfaceIP(iface)
 	return ip
+}
+
+// killPPTPInstance terminates any pppd/pptp processes belonging to this VPN so
+// repeated connect attempts don't stack up (each pppd would create a new pppN).
+func killPPTPInstance(token, server string) {
+	_ = exec.Command("pkill", "-f", "pppd call pptp-"+token).Run()
+	if server != "" {
+		_ = exec.Command("pkill", "-f", "pptp "+server+" --nolaunchpppd").Run()
+	}
 }
 
 // linkToken turns an arbitrary VPN name into a filesystem/CLI-safe token.
