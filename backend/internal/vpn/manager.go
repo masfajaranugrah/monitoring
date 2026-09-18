@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 // from the database on demand.
 type Manager struct {
 	pinger *ping.ICMPPinger
+	mu     sync.Mutex
 }
 
 func NewManager() *Manager {
@@ -31,6 +33,19 @@ func NewManager() *Manager {
 // stores its real name on the model (pppd names it pppN unless the installed
 // ppp version supports the ifname option, which is absent on Ubuntu 20.04).
 func (m *Manager) Connect(v *models.VPNConnection, password string) error {
+	// Serialisasi seluruh koneksi: dua panggilan Connect yang bersamaan dari
+	// auto-connect / UI / test saling membunuh pppd masing-masing.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Sudah hidup? jangan bunuh lalu connect ulang.
+	if v.InterfaceName != "" {
+		if ip, err := m.interfaceIP(v.InterfaceName); err == nil && ip != "" {
+			log.Printf("[vpn] %s already up on %s (%s), skipping connect", v.Name, v.InterfaceName, ip)
+			return nil
+		}
+	}
+
 	// Bersihkan instance lama dulu, agar nama pppN bisa dipakai ulang dan
 	// snapshot di bawah benar-benar mencerminkan kondisi sebelum connect.
 	if models.VpnType(v.VPNType) == models.VpnPPTP {
