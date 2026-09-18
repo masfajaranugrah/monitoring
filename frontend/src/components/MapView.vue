@@ -17,6 +17,7 @@ const mapEl = ref(null)
 let map = null
 let markers = null
 let draftMarker = null
+let areaMarker = null
 const markerMap = new Map()
 
 const STATUS_COLORS = {
@@ -113,9 +114,33 @@ function focusCustomer(customer) {
   }
 }
 
-function flyTo(lat, lng, zoom = 12) {
+function flyTo(lat, lng, zoom = 12, label = '') {
   if (!map) return
+  if (areaMarker) {
+    map.removeLayer(areaMarker)
+    areaMarker = null
+  }
   map.flyTo([lat, lng], zoom, { duration: 1.2 })
+  if (label) {
+    areaMarker = L.marker([lat, lng], {
+      icon: L.divIcon({
+        className: '',
+        html: '<div class="map-marker map-marker--area" style="--marker-color:var(--primary)"><span class="map-marker__inner"></span></div>',
+        iconSize: [22, 22],
+        iconAnchor: [11, 22]
+      }),
+      zIndexOffset: 2000
+    })
+    areaMarker.bindPopup(`<div class="map-popup"><strong>${escapeHtml(label)}</strong></div>`, {
+      maxWidth: 260,
+      className: 'map-popup-shell'
+    })
+    areaMarker.addTo(map)
+    setTimeout(() => {
+      map.closePopup()
+      if (areaMarker) areaMarker.openPopup()
+    }, 1400)
+  }
 }
 
 function onMapClick(e) {
@@ -173,6 +198,7 @@ onUnmounted(() => {
     map = null
     markers = null
     draftMarker = null
+    areaMarker = null
     markerMap.clear()
   }
 })

@@ -16,7 +16,7 @@ const loading = ref(true)
 const mapView = ref(null)
 const search = ref('')
 const searchOpen = ref(false)
-const { areaResults, areaLoading, clearArea } = useAreaSearch(search)
+const { areaResults, areaLoading, clearArea, areaZoom } = useAreaSearch(search)
 
 const searchResults = computed(() => {
   const q = search.value.toLowerCase().trim()
@@ -48,7 +48,7 @@ function pickFirst() {
 }
 
 function focusFromArea(a) {
-  mapView.value?.flyTo(Number(a.lat), Number(a.lon), 12)
+  mapView.value?.flyTo(Number(a.lat), Number(a.lon), areaZoom(a), a.display_name)
   clearArea()
   search.value = ''
   searchOpen.value = false

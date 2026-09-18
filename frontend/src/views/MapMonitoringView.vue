@@ -17,7 +17,7 @@ const search = ref('')
 const searchOpen = ref(false)
 const loading = ref(true)
 let mapView = null
-const { areaResults, areaLoading, clearArea } = useAreaSearch(search)
+const { areaResults, areaLoading, clearArea, areaZoom } = useAreaSearch(search)
 
 async function load() {
   try {
@@ -66,7 +66,7 @@ function focusOnList(customer) {
 }
 
 function focusFromArea(a) {
-  mapView?.flyTo(Number(a.lat), Number(a.lon), 12)
+  mapView?.flyTo(Number(a.lat), Number(a.lon), areaZoom(a), a.display_name)
   clearArea()
   search.value = ''
 }

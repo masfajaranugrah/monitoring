@@ -42,5 +42,19 @@ export function useAreaSearch(queryRef) {
     areaLoading.value = false
   }
 
-  return { areaResults, areaLoading, clearArea }
+  function areaZoom(a) {
+    const bb = a.boundingbox
+    if (Array.isArray(bb) && bb.length >= 4) {
+      const dLat = Math.abs(Number(bb[1]) - Number(bb[0]))
+      const dLng = Math.abs(Number(bb[3]) - Number(bb[2]))
+      const size = Math.max(dLat, dLng)
+      if (size > 0) {
+        const z = Math.round(18 - Math.log2(360 / size))
+        return Math.max(10, Math.min(18, z))
+      }
+    }
+    return 15
+  }
+
+  return { areaResults, areaLoading, clearArea, areaZoom }
 }
