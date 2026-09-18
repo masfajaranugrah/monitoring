@@ -260,18 +260,19 @@ func (h *VPNHandler) TestConnection(c *gin.Context) {
 	if v.IsActive {
 		_, _ = database.Pool.Exec(ctx, `
 			UPDATE vpn_connections SET status = $1, latency_ms = $2,
-			  local_ip = $3, last_connected_at = CASE WHEN $1 = 'CONNECTED' THEN now() ELSE last_connected_at END,
+			  local_ip = $3, interface_name = $4,
+			  last_connected_at = CASE WHEN $1 = 'CONNECTED' THEN now() ELSE last_connected_at END,
 			  updated_at = now()
-			WHERE id = $4`,
-			status, latency, ip, id)
+			WHERE id = $5`,
+			status, latency, ip, v.InterfaceName, id)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"connected": ok,
-		"status":    status,
+		"connected":  ok,
+		"status":     status,
 		"latency_ms": latency,
-		"message":   msg,
-		"local_ip":  ip,
+		"message":    msg,
+		"local_ip":   ip,
 	})
 }
 
@@ -335,8 +336,8 @@ func (h *VPNHandler) ConnectVPN(c *gin.Context) {
 		}
 		_, _ = database.Pool.Exec(ctx,
 			`UPDATE vpn_connections SET status='CONNECTED', latency_ms=$1, local_ip=$2,
-			  last_connected_at=now(), updated_at=now() WHERE id=$3`,
-			lat, newIP, id)
+			  interface_name=$3, last_connected_at=now(), updated_at=now() WHERE id=$4`,
+			lat, newIP, v.InterfaceName, id)
 	} else {
 		_, _ = database.Pool.Exec(ctx,
 			`UPDATE vpn_connections SET status='DISCONNECTED', latency_ms=NULL, local_ip='',
@@ -350,11 +351,11 @@ func (h *VPNHandler) ConnectVPN(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"connected": connected,
-		"status":    newStatus,
-		"local_ip":  newIP,
+		"connected":  connected,
+		"status":     newStatus,
+		"local_ip":   newIP,
 		"latency_ms": lat,
-		"message":   msg,
+		"message":    msg,
 	})
 }
 
@@ -430,8 +431,8 @@ func (h *VPNHandler) AutoConnectActiveVPNs(ctx context.Context) {
 			if s == models.VpnConnected && ip != "" {
 				_, _ = database.Pool.Exec(ctx,
 					`UPDATE vpn_connections SET status='CONNECTED', local_ip=$1,
-					  last_connected_at=now(), updated_at=now() WHERE id=$2`,
-					ip, v.ID)
+					  interface_name=$2, last_connected_at=now(), updated_at=now() WHERE id=$3`,
+					ip, v.InterfaceName, v.ID)
 				log.Printf("[vpn] auto-connect: %s connected (%s)", v.Name, ip)
 				break
 			}

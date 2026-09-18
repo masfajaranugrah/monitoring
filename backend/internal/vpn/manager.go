@@ -27,17 +27,83 @@ func NewManager() *Manager {
 }
 
 // Connect attempts to bring up a tunnel for the given VPN definition.
+// After starting the client it waits for the new ppp interface to appear and
+// stores its real name on the model (pppd names it pppN unless the installed
+// ppp version supports the ifname option, which is absent on Ubuntu 20.04).
 func (m *Manager) Connect(v *models.VPNConnection, password string) error {
+	before := listPPPInterfaces()
+
+	var err error
 	switch models.VpnType(v.VPNType) {
 	case models.VpnL2TP:
-		return m.connectL2TP(v, password)
+		err = m.connectL2TP(v, password)
 	case models.VpnSSTP:
-		return m.connectSSTP(v, password)
+		err = m.connectSSTP(v, password)
 	case models.VpnPPTP:
-		return m.connectPPTP(v, password)
+		err = m.connectPPTP(v, password)
 	default:
 		return fmt.Errorf("unsupported VPN type: %s", v.VPNType)
 	}
+	if err != nil {
+		return err
+	}
+
+	if iface, ok := m.waitForNewPPP(before, 12*time.Second); ok {
+		v.InterfaceName = iface
+		log.Printf("[vpn] %s tunnel is up on %s", v.Name, iface)
+	} else {
+		log.Printf("[vpn] %s: no new ppp interface detected after connect", v.Name)
+	}
+	return nil
+}
+
+// listPPPInterfaces returns the set of currently present ppp interfaces.
+func listPPPInterfaces() map[string]struct{} {
+	set := make(map[string]struct{})
+	out, err := exec.Command("ip", "-o", "link", "show").Output()
+	if err != nil {
+		return set
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			name := strings.TrimSuffix(fields[1], ":")
+			if strings.HasPrefix(name, "ppp") {
+				set[name] = struct{}{}
+			}
+		}
+	}
+	return set
+}
+
+// waitForNewPPP polls until a ppp interface that was not in `before` has an
+// IPv4 address (i.e. IPCP completed), returning its name.
+func (m *Manager) waitForNewPPP(before map[string]struct{}, timeout time.Duration) (string, bool) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		out, err := exec.Command("ip", "-o", "link", "show").Output()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			name := strings.TrimSuffix(fields[1], ":")
+			if !strings.HasPrefix(name, "ppp") {
+				continue
+			}
+			if _, existed := before[name]; existed {
+				continue
+			}
+			if ip, err := m.interfaceIP(name); err == nil && ip != "" {
+				return name, true
+			}
+		}
+	}
+	return "", false
 }
 
 // ---------- L2TP ----------
@@ -116,14 +182,14 @@ func (m *Manager) connectPPTP(v *models.VPNConnection, password string) error {
 
 // connectPPTPCmd uses the pptp binary from pptp-linux (simpler interface).
 func (m *Manager) connectPPTPCmd(v *models.VPNConnection, password string) error {
-	peerFile := "/etc/ppp/peers/pptp-" + v.Name
+	token := linkToken(v.Name)
+	peerFile := "/etc/ppp/peers/pptp-" + token
 	opt := fmt.Sprintf(`pty "pptp %s --nolaunchpppd"
 name %s
 password %s
 remotename pptp-peer
 noauth
 defaultroute
-replacedefaultroute
 noipdefault
 nobsdcomp
 nodeflate
@@ -139,19 +205,23 @@ persist
 maxfail 0
 `, v.ServerAddress, v.Username, password)
 	if err := os.MkdirAll("/etc/ppp/peers", 0o755); err != nil {
-		_ = os.WriteFile("/tmp/pptp-peer-"+v.Name, []byte(opt), 0o600)
-		peerFile = "/tmp/pptp-peer-" + v.Name
+		_ = os.WriteFile("/tmp/pptp-peer-"+token, []byte(opt), 0o600)
+		peerFile = "/tmp/pptp-peer-" + token
 	} else {
 		if err := os.WriteFile(peerFile, []byte(opt), 0o600); err != nil {
 			return err
 		}
 	}
 
-	// Hapus config secrets dari filesystem setelah connect.
-	defer os.Remove(peerFile)
+	// Jangan hapus segera: pppd membaca file peer setelah proses di-spawn.
+	// Hapus setelah beberapa detik agar kredensial tidak menetap di disk.
+	go func() {
+		time.Sleep(20 * time.Second)
+		_ = os.Remove(peerFile)
+	}()
 
 	// Jalankan pppd dengan peer config (pptp tunnel di-handle oleh pty).
-	cmd := exec.Command("pppd", "call", "pptp-"+v.Name)
+	cmd := exec.Command("pppd", "call", "pptp-"+token)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("pppd start failed: %w", err)
@@ -171,7 +241,7 @@ func (m *Manager) connectPPTPViaPPPD(v *models.VPNConnection, password string) e
 		"pty", fmt.Sprintf("pptp %s --nolaunchpppd", v.ServerAddress),
 		"name", v.Username,
 		"password", password,
-		"noauth", "defaultroute", "replacedefaultroute",
+		"noauth", "defaultroute",
 		"noipdefault", "nobsdcomp", "nodeflate",
 		"lcp-echo-interval", "60", "lcp-echo-failure", "3",
 		"mtu", "1400", "mru", "1400")
@@ -238,6 +308,27 @@ func (m *Manager) SourceIP(v *models.VPNConnection) string {
 	iface := m.interfaceName(v)
 	ip, _ := m.interfaceIP(iface)
 	return ip
+}
+
+// linkToken turns an arbitrary VPN name into a filesystem/CLI-safe token.
+func linkToken(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		out = "vpn"
+	}
+	if len(out) > 20 {
+		out = out[:20]
+	}
+	return out
 }
 
 func (m *Manager) interfaceName(v *models.VPNConnection) string {
