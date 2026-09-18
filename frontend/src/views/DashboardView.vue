@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import MapView from '../components/MapView.vue'
@@ -12,6 +12,43 @@ const customers = ref([])
 const statusFilter = ref('ALL')
 const vpnFilter = ref('ALL')
 const loading = ref(true)
+const mapView = ref(null)
+const search = ref('')
+const searchOpen = ref(false)
+
+const searchResults = computed(() => {
+  const q = search.value.toLowerCase().trim()
+  if (!q) return []
+  return customers.value
+    .filter(
+      (c) =>
+        c.customer_code?.toLowerCase().includes(q) ||
+        c.customer_name?.toLowerCase().includes(q) ||
+        c.ip_address?.toLowerCase().includes(q)
+    )
+    .slice(0, 8)
+})
+
+function focusFromSearch(c) {
+  if (c.latitude == null || c.longitude == null) {
+    search.value = ''
+    searchOpen.value = false
+    return
+  }
+  mapView.value?.focusCustomer(c)
+  search.value = ''
+  searchOpen.value = false
+}
+
+function pickFirst() {
+  if (searchResults.value.length) focusFromSearch(searchResults.value[0])
+}
+
+function onSearchBlur() {
+  setTimeout(() => {
+    searchOpen.value = false
+  }, 150)
+}
 
 const statuses = ['ALL', 'ONLINE', 'OFFLINE', 'WARNING']
 
@@ -93,6 +130,29 @@ onMounted(load)
 <template>
   <div class="dashboard">
     <div class="dashboard__controls">
+      <div class="dash-search-wrap">
+        <div class="search">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input
+            v-model="search"
+            placeholder="Cari kode, nama, atau IP..."
+            @focus="searchOpen = true"
+            @input="searchOpen = !!search.trim()"
+            @blur="onSearchBlur"
+            @keydown.enter="pickFirst"
+          />
+        </div>
+        <ul v-if="searchOpen && searchResults.length" class="search-drop">
+          <li v-for="c in searchResults" :key="c.id" @mousedown.prevent="focusFromSearch(c)">
+            <strong>{{ c.customer_name }}</strong>
+            <span class="search-drop__meta">{{ c.customer_code }} · {{ c.ip_address }} · {{ c.status }}</span>
+          </li>
+        </ul>
+        <div v-else-if="searchOpen && search.trim()" class="search-drop search-drop--empty">
+          Tidak ada pelanggan cocok
+        </div>
+      </div>
+
       <div class="filter-group">
         <span class="filter-group__label">Status:</span>
         <button
@@ -121,6 +181,7 @@ onMounted(load)
 
     <div class="dashboard__map">
       <MapView
+        ref="mapView"
         :customers="customers"
         :status-filter="statusFilter"
         :vpn-filter="vpnFilter"
@@ -163,3 +224,57 @@ onMounted(load)
     </div>
   </div>
 </template>
+
+<style scoped>
+.dash-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  max-width: 360px;
+}
+
+.dash-search-wrap .search {
+  flex: 1;
+}
+
+.search-drop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 1200;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.search-drop li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.search-drop li:hover {
+  background: var(--bg-hover);
+}
+
+.search-drop__meta {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.search-drop--empty {
+  padding: 10px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+</style>

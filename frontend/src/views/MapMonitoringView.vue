@@ -62,6 +62,14 @@ function focusOnList(customer) {
   mapView?.focusCustomer(customer)
 }
 
+watch(filteredList, (list) => {
+  if (list.length !== 1 || !search.value.trim()) return
+  const c = list[0]
+  if (c.latitude != null && c.longitude != null) {
+    mapView?.focusCustomer(c)
+  }
+})
+
 onMounted(() => {
   load()
   monitor.fetchStats()
