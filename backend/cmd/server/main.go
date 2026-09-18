@@ -18,9 +18,9 @@ import (
 	"monitoring/internal/handlers"
 	"monitoring/internal/middleware"
 	"monitoring/internal/ping"
-	"monitoring/internal/sse"
 	"monitoring/internal/store"
 	"monitoring/internal/vpn"
+	"monitoring/internal/ws"
 )
 
 func main() {
@@ -49,7 +49,7 @@ func main() {
 	middleware.InitJWT(cfg.JWTSecret)
 
 	// --- Realtime hub ---
-	hub := sse.NewHub()
+	hub := ws.NewHub()
 
 	// --- Monitoring engine ---
 	storer := store.New()
@@ -110,10 +110,12 @@ func main() {
 	{
 		// Public
 		api.POST("/auth/login", handlers.Login)
-		api.GET("/events", hub.Stream)
 
 		auth := api.Group("", middleware.AuthMiddleware())
 		{
+			// Realtime events (WebSocket). Token diterima via query (?token=...)
+			// karena WebSocket browser tidak bisa set header custom.
+			auth.GET("/events", hub.Stream)
 			auth.GET("/auth/me", handlers.Me)
 			auth.POST("/auth/change-password", handlers.ChangePassword)
 

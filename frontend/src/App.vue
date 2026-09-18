@@ -1,16 +1,28 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
 import TopBar from './components/TopBar.vue'
+import { useAuthStore } from './stores/auth'
 import { useMonitorStore } from './stores/monitor'
 import { startRealtime, stopRealtime } from './services/realtime'
 
 const route = useRoute()
+const auth = useAuthStore()
 const monitor = useMonitorStore()
 
+// Buka/tutup koneksi WebSocket mengikuti status login, sehingga begitu user
+// login koneksi langsung tersambung dan saat logout ikut terputus.
+watch(
+  () => auth.token,
+  (token) => {
+    if (token) startRealtime()
+    else stopRealtime()
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
-  startRealtime()
   monitor.fetchStats()
   monitor.fetchVPNs()
 })

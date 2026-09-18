@@ -129,5 +129,5 @@ psql "$DATABASE_URL" -f backend/migrations/sample_data.sql
 | `ping: socket: Operation not permitted` | Jalankan PM2 sebagai root / tambahkan `cap_net_raw` pada binary |
 | VPN tidak konek | Pastikan `xl2tpd`/`sstp-client` terinstal; cek `pm2 logs monitoring` |
 | Login 401 setelah upgrade | Token lama kadaluarsa; `JWT_SECRET` berubah → logout semua |
-| SSE terputus | Pastikan nginx `proxy_buffering off` pada `/api/events` |
+| Realtime WebSocket terputus | Pastikan nginx `/api/events` meneruskan `Upgrade`/`Connection: upgrade` (`proxy_set_header Upgrade $http_upgrade;`) |
 | Koneksi DB ditolak | Sesuaikan `DATABASE_URL`; pastikan `pg_hba.conf` mengizinkan host |

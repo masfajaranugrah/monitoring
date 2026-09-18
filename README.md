@@ -206,13 +206,13 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ## REST API
 
-Semua endpoint (kecuali `/auth/login` dan `/events`) wajib header:
+Semua endpoint (kecuali `/auth/login`) wajib header:
 `Authorization: Bearer <token>`
 
 | Method | Endpoint | Keterangan | Role |
 |---|---|---|---|
 | POST | `/api/auth/login` | Login | publik |
-| GET | `/api/events` | SSE realtime stream | Bearer* |
+| GET | `/api/events?token=` | Realtime WebSocket stream | Bearer* |
 | GET | `/api/auth/me` | Info user | – |
 | POST | `/api/auth/change-password` | Ganti password | – |
 | GET | `/api/dashboard/stats` | Statistik dashboard | – |
@@ -230,9 +230,9 @@ Semua endpoint (kecuali `/auth/login` dan `/events`) wajib header:
 | GET | `/api/alerts` | Daftar alert | – |
 | PATCH | `/api/alerts/:id/read` | Tandai dibaca | – |
 
-> \* SSE `/api/events` juga membuka event sebelum login dibutuhkan untuk handshake; kerahasiaan
-> payload dijaga oleh otentikasi halaman frontend. Untuk produksi ketat, tambahkan middleware auth
-> pada endpoint ini dan pakai `fetch` + `ReadableStream` di frontend.
+> \* Koneksi WebSocket browser tidak bisa set header `Authorization`, sehingga token JWT
+> dikirim via query string (`/api/events?token=<jwt>`). Pastikan token selalu valid; koneksi
+> akan ditutup server jika token invalid/expired.
 
 Contoh query list customer:
 
@@ -247,9 +247,10 @@ Return: `{ data, total, page, page_size, pages }`
 
 ---
 
-## Realtime (SSE)
+## Realtime (WebSocket)
 
-Frontend membuka `EventSource("/api/events")`. Event:
+Frontend membuka WebSocket `ws(s)://<host>/api/events?token=<jwt>`. Event dikirim sebagai
+JSON `{ "event": ..., "data": ... }`:
 
 | Event | Payload |
 |---|---|
@@ -258,7 +259,8 @@ Frontend membuka `EventSource("/api/events")`. Event:
 | `alert:new` | alert baru |
 
 Fitur ini membuat marker peta dan statistik berubah **tanpa reload halaman** dan **tanpa polling
-berat** — semua ping berjalan di server.
+berat** — semua ping berjalan di server. Di balik reverse proxy (nginx) pastikan header
+`Upgrade`/`Connection: upgrade` diteruskan ke `/api/events` (lihat `nginx/monitoring.conf`).
 
 ---
 
@@ -288,7 +290,8 @@ Lihat `.env.example`. Variabel utama:
   ```sql
   CREATE TABLE ping_results (...) PARTITION BY RANGE (pinged_at);
   ```
-- Singleton app; nginx `proxy_buffering off` khusus `/api/events` agar SSE tidak tertahan buffer.
+- Singleton app; nginx `/api/events` harus meneruskan `Upgrade`/`Connection: upgrade`
+  (`proxy_set_header Upgrade $http_upgrade;`) agar WebSocket tidak tertahan proxy.
 - Retensi: `PING_HISTORY_RETENTION_DAYS`.
 
 ---

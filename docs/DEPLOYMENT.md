@@ -165,7 +165,7 @@ sudo certbot --nginx -d YOUR_DOMAIN
 ```
 
 Konfigurasi nginx sudah:
-- Meneruskan `/api/*` dan `/api/events` (dengan `proxy_buffering off`).
+- Meneruskan `/api/*` dan `/api/events` (WebSocket: `Upgrade`/`Connection: upgrade` + `proxy_buffering off`).
 - Menyajikan SPA build.
 - `Cache-Control` di `/assets/`.
 
