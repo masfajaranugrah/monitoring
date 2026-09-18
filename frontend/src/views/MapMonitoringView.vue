@@ -5,6 +5,7 @@ import api from '../api'
 import MapView from '../components/MapView.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useMonitorStore } from '../stores/monitor'
+import { useAreaSearch } from '../composables/useAreaSearch'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -13,8 +14,10 @@ const customers = ref([])
 const statusFilter = ref('ALL')
 const vpnFilter = ref('ALL')
 const search = ref('')
+const searchOpen = ref(false)
 const loading = ref(true)
 let mapView = null
+const { areaResults, areaLoading, clearArea } = useAreaSearch(search)
 
 async function load() {
   try {
@@ -62,6 +65,26 @@ function focusOnList(customer) {
   mapView?.focusCustomer(customer)
 }
 
+function focusFromArea(a) {
+  mapView?.flyTo(Number(a.lat), Number(a.lon), 12)
+  clearArea()
+  search.value = ''
+}
+
+function onSearchBlur() {
+  setTimeout(() => {
+    searchOpen.value = false
+  }, 150)
+}
+
+function pickAreaFirst() {
+  if (filteredList.value.length === 1) {
+    focusOnList(filteredList.value[0])
+  } else if (areaResults.value.length) {
+    focusFromArea(areaResults.value[0])
+  }
+}
+
 watch(filteredList, (list) => {
   if (list.length !== 1 || !search.value.trim()) return
   const c = list[0]
@@ -83,9 +106,103 @@ onBeforeUnmount(() => {
 <template>
   <div class="mapmon">
     <div class="mapmon__toolbar panel">
-      <div class="search">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-        <input v-model="search" placeholder="Cari kode, nama, atau IP pelanggan..." />
+      <div class="search-wrap">
+        <div class="search">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input
+            v-model="search"
+            placeholder="Cari kode, nama, IP, atau wilayah..."
+            @focus="searchOpen = true"
+            @input="searchOpen = true"
+            @blur="onSearchBlur"
+            @keydown.enter="pickAreaFirst"
+          />
+        </div>
+
+        <div v-if="searchOpen && search.trim()" class="search-drop">
+          <div class="search-drop__head">Wilayah</div>
+          <li v-if="areaLoading" class="search-drop__empty">Mencari wilayah...</li>
+          <template v-else>
+            <li
+              v-for="a in areaResults"
+              :key="'a' + a.osm_id"
+              @mousedown.prevent="focusFromArea(a)"
+            >
+              <strong>{{ a.name || a.display_name }}</strong>
+              <span class="search-drop__meta search-drop__meta--ellipsis">{{ a.display_name }}</span>
+            </li>
+            <li v-if="!areaResults.length" class="search-drop__empty">
+              Wilayah tidak ditemukan
+            </li>
+</template>
+
+<style scoped>
+.search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+}
+
+.search-wrap .search {
+  flex: 1;
+}
+
+.search-drop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 1200;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.search-drop__head {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.search-drop li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.search-drop li:hover {
+  background: var(--bg-hover);
+}
+
+.search-drop__meta {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.search-drop__meta--ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.search-drop__empty {
+  padding: 8px 10px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+</style>
+        </div>
       </div>
 
       <div class="filter-group">

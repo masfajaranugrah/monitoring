@@ -113,6 +113,11 @@ function focusCustomer(customer) {
   }
 }
 
+function flyTo(lat, lng, zoom = 12) {
+  if (!map) return
+  map.flyTo([lat, lng], zoom, { duration: 1.2 })
+}
+
 function onMapClick(e) {
   if (!props.clickToAdd) return
   emit('map-click', { lat: e.latlng.lat, lng: e.latlng.lng })
@@ -175,7 +180,7 @@ onUnmounted(() => {
 watch(filtered, () => rebuildMarkers(), { deep: true })
 watch(() => props.draftPoint, renderDraft)
 
-defineExpose({ focusCustomer })
+defineExpose({ focusCustomer, flyTo })
 </script>
 
 <template>

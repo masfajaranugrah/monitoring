@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import api from '../api'
 import MapView from '../components/MapView.vue'
 import { useMonitorStore } from '../stores/monitor'
+import { useAreaSearch } from '../composables/useAreaSearch'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -15,6 +16,7 @@ const loading = ref(true)
 const mapView = ref(null)
 const search = ref('')
 const searchOpen = ref(false)
+const { areaResults, areaLoading, clearArea } = useAreaSearch(search)
 
 const searchResults = computed(() => {
   const q = search.value.toLowerCase().trim()
@@ -42,6 +44,14 @@ function focusFromSearch(c) {
 
 function pickFirst() {
   if (searchResults.value.length) focusFromSearch(searchResults.value[0])
+  else if (areaResults.value.length) focusFromArea(areaResults.value[0])
+}
+
+function focusFromArea(a) {
+  mapView.value?.flyTo(Number(a.lat), Number(a.lon), 12)
+  clearArea()
+  search.value = ''
+  searchOpen.value = false
 }
 
 function onSearchBlur() {
@@ -142,14 +152,38 @@ onMounted(load)
             @keydown.enter="pickFirst"
           />
         </div>
-        <ul v-if="searchOpen && searchResults.length" class="search-drop">
-          <li v-for="c in searchResults" :key="c.id" @mousedown.prevent="focusFromSearch(c)">
-            <strong>{{ c.customer_name }}</strong>
-            <span class="search-drop__meta">{{ c.customer_code }} · {{ c.ip_address }} · {{ c.status }}</span>
-          </li>
-        </ul>
-        <div v-else-if="searchOpen && search.trim()" class="search-drop search-drop--empty">
-          Tidak ada pelanggan cocok
+        <div v-if="searchOpen && (search.trim() || searchResults.length)" class="search-drop">
+          <template v-if="searchResults.length">
+            <div class="search-drop__head">Pelanggan</div>
+            <li
+              v-for="c in searchResults"
+              :key="'c' + c.id"
+              @mousedown.prevent="focusFromSearch(c)"
+            >
+              <strong>{{ c.customer_name }}</strong>
+              <span class="search-drop__meta">{{ c.customer_code }} · {{ c.ip_address }} · {{ c.status }}</span>
+            </li>
+          </template>
+          <template v-else-if="search.trim()">
+            <div class="search-drop__head">Pelanggan</div>
+            <li class="search-drop__empty">Tidak ada pelanggan cocok</li>
+          </template>
+
+          <div v-if="search.trim()" class="search-drop__head">Wilayah</div>
+          <li v-if="areaLoading" class="search-drop__empty">Mencari wilayah...</li>
+          <template v-else>
+            <li
+              v-for="a in areaResults"
+              :key="'a' + a.osm_id"
+              @mousedown.prevent="focusFromArea(a)"
+            >
+              <strong>{{ a.name || a.display_name }}</strong>
+              <span class="search-drop__meta search-drop__meta--ellipsis">{{ a.display_name }}</span>
+            </li>
+            <li v-if="!areaResults.length" class="search-drop__empty">
+              Wilayah tidak ditemukan
+            </li>
+          </template>
         </div>
       </div>
 
@@ -263,6 +297,14 @@ onMounted(load)
   font-size: 13px;
 }
 
+.search-drop__head {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
 .search-drop li:hover {
   background: var(--bg-hover);
 }
@@ -272,8 +314,20 @@ onMounted(load)
   color: var(--text-faint);
 }
 
+.search-drop__meta--ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .search-drop--empty {
   padding: 10px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.search-drop__empty {
+  padding: 8px 10px;
   color: var(--text-faint);
   font-size: 13px;
 }
