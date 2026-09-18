@@ -187,16 +187,9 @@ function applyRealtime() {
 
 watch(() => monitor.lastEvent, applyRealtime)
 
-let refreshTimer = null
-
 onMounted(() => {
   load()
   monitor.fetchVPNs()
-  refreshTimer = setInterval(load, 10000)
-})
-
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 
