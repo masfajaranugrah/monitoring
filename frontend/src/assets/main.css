@@ -90,6 +90,29 @@ button { font-family: inherit; }
 }
 .sidebar__user strong { display: block; font-size: 13px; }
 .sidebar__user span { font-size: 11px; color: var(--text-dim); }
+.sidebar__user-role { display: inline-flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.sidebar__status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+.sidebar__footer { display: flex; flex-direction: column; gap: 12px; }
+
+.sys-stats {
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sys-stats__title { display: flex; flex-direction: column; margin-bottom: 2px; }
+.sys-stats__title strong { font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sys-stats__title span { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.sys-stat { display: flex; flex-direction: column; gap: 4px; }
+.sys-stat__head { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--text-dim); }
+.sys-stat__head em { font-style: normal; color: var(--text-faint); font-size: 10px; }
+.sys-stat__head span:last-child { font-family: "SF Mono", Menlo, monospace; color: var(--text); }
+.sys-stat__bar { height: 5px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.sys-stat__fill { height: 100%; border-radius: 999px; transition: width 0.4s ease, background 0.4s ease; }
+.sys-stats__hint { font-size: 11px; color: var(--text-faint); }
 
 /* ---------- Topbar ---------- */
 .topbar {

@@ -57,6 +57,9 @@ func main() {
 	engine := ping.NewMonitorEngine(storer, hub, cfg.PingConcurrency, vpnManager.EnsureRoute)
 	engine.Start(ctx)
 
+	// Handlers use the engine to nudge reloads after customer mutations.
+	handlers.MonitorEngine = engine
+
 	// --- Background retention ---
 	go store.RetentionWorker(ctx)
 
@@ -116,6 +119,7 @@ func main() {
 
 			auth.GET("/dashboard/stats", handlers.GetDashboardStats)
 			auth.GET("/map/customers", handlers.MapCustomers)
+			auth.GET("/system/stats", handlers.GetSystemStats)
 
 			// Customers
 			auth.GET("/customers", handlers.ListCustomers)

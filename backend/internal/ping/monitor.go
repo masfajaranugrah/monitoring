@@ -278,6 +278,7 @@ func (m *MonitorEngine) process(ctx context.Context, job workItem) {
 			"customer_id": outcome.CustomerID,
 			"status":      outcome.Status,
 			"latency_ms":  outcome.LatencyMs,
+			"last_check":  time.Now(),
 		}
 		m.Hub.BroadcastCustomerUpdate(payload)
 	}

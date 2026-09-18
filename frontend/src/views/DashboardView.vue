@@ -222,11 +222,12 @@ async function saveCustomer() {
 function applyRealtime() {
   const ev = monitor.lastEvent
   if (!ev || ev.event !== 'customer:update') return
-  const { customer_id, status, latency_ms } = ev.data || {}
+  const { customer_id, status, latency_ms, last_check } = ev.data || {}
   const target = customers.value.find((c) => c.id === customer_id)
   if (!target) return
   if (status) target.status = status
   if (latency_ms !== undefined) target.latency_ms = latency_ms
+  if (last_check) target.last_check = last_check
 }
 
 watch(() => monitor.lastEvent, applyRealtime)

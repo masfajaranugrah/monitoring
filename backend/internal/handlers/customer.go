@@ -238,6 +238,15 @@ func CreateCustomer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"id": id, "message": "Customer created successfully"})
+
+	// Let the monitor know immediately so the new customer is pinged right away.
+	nudgeMonitor()
+}
+
+func nudgeMonitor() {
+	if MonitorEngine != nil {
+		go MonitorEngine.Reload()
+	}
 }
 
 func GetCustomer(c *gin.Context) {
@@ -328,6 +337,7 @@ func UpdateCustomer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Customer updated successfully"})
+	nudgeMonitor()
 }
 
 func DeleteCustomer(c *gin.Context) {
@@ -353,6 +363,7 @@ func DeleteCustomer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Customer deleted successfully"})
+	nudgeMonitor()
 }
 
 func ToggleMonitoring(c *gin.Context) {
@@ -383,6 +394,7 @@ func ToggleMonitoring(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Monitoring setting updated"})
+	nudgeMonitor()
 }
 
 func SyncLocation(c *gin.Context) {
