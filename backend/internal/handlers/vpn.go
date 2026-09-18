@@ -9,10 +9,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"fiber-monitor/internal/crypto"
-	"fiber-monitor/internal/database"
-	"fiber-monitor/internal/models"
-	"fiber-monitor/internal/vpn"
+	"monitoring/internal/crypto"
+	"monitoring/internal/database"
+	"monitoring/internal/models"
+	"monitoring/internal/vpn"
 )
 
 type VPNHandler struct {

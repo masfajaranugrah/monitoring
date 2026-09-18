@@ -26,7 +26,7 @@ function logout() {
 
 <template>
   <header class="topbar">
-    <h1 class="topbar__title">{{ titles[route.path] || 'Fiber Monitor' }}</h1>
+    <h1 class="topbar__title">{{ titles[route.path] || 'Monitoring' }}</h1>
 
     <div class="topbar__right">
       <span class="topbar__status" :class="{ 'topbar__status--live': monitor.connected }">

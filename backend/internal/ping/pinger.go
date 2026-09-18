@@ -91,7 +91,7 @@ func (p *ICMPPinger) pingPrivileged(dst string, source string, timeout time.Dura
 		Body: &icmp.Echo{
 			ID:   id,
 			Seq:  p.seq,
-			Data: bytes.Repeat([]byte("fiber-monitor"), 4),
+			Data: bytes.Repeat([]byte("monitoring"), 4),
 		},
 	}
 	wb, err := msg.Marshal(nil)

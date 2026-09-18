@@ -1,14 +1,14 @@
-# /etc/systemd/system/fiber-monitor.service
-# Monitoring engine fiber-monitor (Go backend)
+# /etc/systemd/system/monitoring.service
+# Monitoring engine (Go backend)
 #
 # Install:
-#   sudo cp deployment/fiber-monitor.service /etc/systemd/system/
+#   sudo cp deployment/monitoring.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
-#   sudo systemctl enable --now fiber-monitor
+#   sudo systemctl enable --now monitoring
 
 [Unit]
-Description=Fiber Monitor - ISP Connection Monitoring Service
-Documentation=https://github.com/your-org/fiber-monitor
+Description=ISP Connection Monitoring Service
+Documentation=https://github.com/your-org/monitoring
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -16,15 +16,15 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/opt/fiber-monitor
-ExecStart=/opt/fiber-monitor/bin/fiber-monitor-server
+WorkingDirectory=/opt/monitoring
+ExecStart=/opt/monitoring/bin/monitoring-server
 Restart=always
 RestartSec=5
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
 # Environment
-EnvironmentFile=/opt/fiber-monitor/.env
+EnvironmentFile=/opt/monitoring/.env
 Environment=GIN_MODE=release
 
 # Keamanan minimum

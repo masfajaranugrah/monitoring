@@ -1,5 +1,5 @@
 -- ============================================================
---  Fiber Monitor - Sample Data (opsional, untuk testing)
+--  Monitoring - Sample Data (opsional, untuk testing)
 --  Jalankan: psql $DATABASE_URL -f backend/migrations/sample_data.sql
 -- ============================================================
 

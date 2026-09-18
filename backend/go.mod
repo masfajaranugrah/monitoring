@@ -1,4 +1,4 @@
-module fiber-monitor
+module monitoring
 
 go 1.22
 

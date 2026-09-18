@@ -1,19 +1,19 @@
-// PM2 ecosystem untuk Fiber Monitor (tanpa Docker).
+// PM2 ecosystem untuk Monitoring (tanpa Docker).
 //
 // Pakai:
-//   make build          # build backend (bin/fiber-monitor-server) + frontend (web/)
+//   make build          # build backend (bin/monitoring-server) + frontend (web/)
 //   pm2 start ecosystem.config.cjs
 //   pm2 save            # simpan proses agar hidup lagi setelah reboot (setelah `pm2 startup`)
 //
 // Catatan:
 // - Binary Go memuat file `.env` sendiri dari `cwd` (root repo ini).
 // - Monitoring ICMP/VPN butuh hak akses jaringan, jalankan PM2 sebagai root
-//   atau beri capability: sudo setcap cap_net_raw,cap_net_admin+eip bin/fiber-monitor-server
+//   atau beri capability: sudo setcap cap_net_raw,cap_net_admin+eip bin/monitoring-server
 module.exports = {
   apps: [
     {
-      name: 'fiber-monitor',
-      script: './bin/fiber-monitor-server',
+      name: 'monitoring',
+      script: './bin/monitoring-server',
       cwd: __dirname,
       interpreter: 'none',
       instances: 1,

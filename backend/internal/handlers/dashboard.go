@@ -9,8 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"fiber-monitor/internal/database"
-	"fiber-monitor/internal/models"
+	"monitoring/internal/database"
+	"monitoring/internal/models"
 )
 
 func GetDashboardStats(c *gin.Context) {

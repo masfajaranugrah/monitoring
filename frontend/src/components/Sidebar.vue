@@ -21,7 +21,7 @@ const items = [
     <div class="sidebar__brand">
       <div class="sidebar__logo">FM</div>
       <div class="sidebar__title">
-        <strong>Fiber Monitor</strong>
+        <strong>Monitoring</strong>
         <span>ISP NOC Dashboard</span>
       </div>
     </div>

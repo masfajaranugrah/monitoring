@@ -24,7 +24,7 @@ func Load() *Config {
 
 	return &Config{
 		ServerPort:      getEnv("SERVER_PORT", "8080"),
-		DatabaseURL:     getEnv("DATABASE_URL", "postgres://monitor:monitor123@localhost:5432/fiber_monitor?sslmode=disable"),
+		DatabaseURL:     getEnv("DATABASE_URL", "postgres://monitor:monitor123@localhost:5432/monitoring?sslmode=disable"),
 		JWTSecret:       getEnv("JWT_SECRET", "change-me-in-production"),
 		JWTExpiryHours:  getEnvInt("JWT_EXPIRY_HOURS", 24),
 		PingConcurrency: getEnvInt("PING_CONCURRENCY", 30),

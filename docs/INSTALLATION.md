@@ -1,4 +1,4 @@
-# Panduan Instalasi Fiber Monitor
+# Panduan Instalasi Monitoring
 
 Deployment **tanpa Docker**, memakai **PM2** sebagai process manager.
 Panduan produksi lengkap: [`../DEPLOY-PM2.md`](../DEPLOY-PM2.md).
@@ -10,7 +10,7 @@ Panduan produksi lengkap: [`../DEPLOY-PM2.md`](../DEPLOY-PM2.md).
 Clone repository:
 
 ```bash
-git clone <url-repo> fiber-monitor && cd fiber-monitor
+git clone <url-repo> monitoring && cd monitoring
 cp .env.example .env
 ```
 
@@ -24,7 +24,7 @@ openssl rand -base64 48      # untuk ENCRYPTION_KEY
 Contoh:
 
 ```ini
-DATABASE_URL=postgres://fiber_monitor:PASSWORD@localhost:5432/fiber_monitor?sslmode=disable
+DATABASE_URL=postgres://monitoring:PASSWORD@localhost:5432/monitoring?sslmode=disable
 JWT_SECRET=k0TnRj... (hasil openssl)
 ENCRYPTION_KEY=x7Q1Pm... (hasil openssl)
 ```
@@ -56,9 +56,9 @@ Jika repo Debian terlalu lama, gunakan:
 
 ```bash
 sudo -u postgres psql <<'SQL'
-CREATE USER fiber_monitor WITH PASSWORD 'GANTI_PASSWORD_KUAT';
-CREATE DATABASE fiber_monitor OWNER fiber_monitor;
-\c fiber_monitor
+CREATE USER monitoring WITH PASSWORD 'GANTI_PASSWORD_KUAT';
+CREATE DATABASE monitoring OWNER monitoring;
+\c monitoring
 CREATE EXTENSION IF NOT EXISTS postgis;
 SQL
 ```
@@ -81,8 +81,8 @@ pm2 startup systemd   # ikuti perintah sudo yang dicetak
 ### 5. Nginx reverse proxy
 
 ```bash
-sudo cp nginx/fiber-monitor.conf /etc/nginx/sites-available/fiber-monitor
-sudo ln -s /etc/nginx/sites-available/fiber-monitor /etc/nginx/sites-enabled/
+sudo cp nginx/monitoring.conf /etc/nginx/sites-available/monitoring
+sudo ln -s /etc/nginx/sites-available/monitoring /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -97,7 +97,7 @@ Sama seperti Opsi A tetapi menjalankan binary langsung tanpa PM2:
 
 ```bash
 make build && make sync-dist
-./bin/fiber-monitor-server
+./bin/monitoring-server
 ```
 
 Untuk produksi tetap disarankan PM2/systemd agar otomatis restart.
@@ -127,7 +127,7 @@ psql "$DATABASE_URL" -f backend/migrations/sample_data.sql
 |---|---|
 | Peta tidak tampil | Pastikan akses ke `tile.openstreetmap.org` tidak diblokir firewall server |
 | `ping: socket: Operation not permitted` | Jalankan PM2 sebagai root / tambahkan `cap_net_raw` pada binary |
-| VPN tidak konek | Pastikan `xl2tpd`/`sstp-client` terinstal; cek `pm2 logs fiber-monitor` |
+| VPN tidak konek | Pastikan `xl2tpd`/`sstp-client` terinstal; cek `pm2 logs monitoring` |
 | Login 401 setelah upgrade | Token lama kadaluarsa; `JWT_SECRET` berubah → logout semua |
 | SSE terputus | Pastikan nginx `proxy_buffering off` pada `/api/events` |
 | Koneksi DB ditolak | Sesuaikan `DATABASE_URL`; pastikan `pg_hba.conf` mengizinkan host |

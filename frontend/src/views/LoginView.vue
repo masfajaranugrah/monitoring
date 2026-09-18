@@ -30,7 +30,7 @@ async function submit() {
     <form class="login__card" @submit.prevent="submit">
       <div class="login__brand">
         <div class="login__logo">FM</div>
-        <h1>Fiber Monitor</h1>
+        <h1>Monitoring</h1>
         <p>ISP Customer Connection Monitoring</p>
       </div>
 

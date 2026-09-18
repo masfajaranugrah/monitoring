@@ -1,4 +1,4 @@
-# Deploy Fiber Monitor ke Ubuntu/Debian
+# Deploy Monitoring ke Ubuntu/Debian
 
 > **Catatan:** deployment sistem ini **tidak memakai Docker**. Panduan resmi ada di
 > **[`DEPLOY-PM2.md`](DEPLOY-PM2.md)** — build native + PM2 sebagai process manager.
@@ -16,7 +16,7 @@ sudo npm install -g pm2
 
 # 2. Clone & konfigurasi
 cd /opt
-sudo git clone <url-repo> fiber-monitor && cd fiber-monitor
+sudo git clone <url-repo> monitoring && cd monitoring
 cp .env.example .env
 nano .env   # DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY
 
@@ -27,8 +27,8 @@ pm2 start ecosystem.config.cjs
 pm2 save && pm2 startup systemd
 
 # 4. Nginx + HTTPS
-sudo cp nginx/fiber-monitor.conf /etc/nginx/sites-available/fiber-monitor
-sudo ln -sf /etc/nginx/sites-available/fiber-monitor /etc/nginx/sites-enabled/
+sudo cp nginx/monitoring.conf /etc/nginx/sites-available/monitoring
+sudo ln -sf /etc/nginx/sites-available/monitoring /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d monitor.example.com

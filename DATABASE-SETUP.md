@@ -1,4 +1,4 @@
-# Setup Database Fiber Monitor
+# Setup Database Monitoring
 
 PostgreSQL 16 + PostGIS. Migrasi dan seed admin otomatis saat backend pertama kali start.
 Deployment memakai **PM2 tanpa Docker** — lihat [`DEPLOY-PM2.md`](DEPLOY-PM2.md).
@@ -19,23 +19,23 @@ psql --version
 
 ```bash
 sudo -u postgres psql <<'SQL'
-CREATE USER fiber_monitor WITH PASSWORD 'GANTI_PASSWORD_KUAT';
-CREATE DATABASE fiber_monitor OWNER fiber_monitor;
-\c fiber_monitor
+CREATE USER monitoring WITH PASSWORD 'GANTI_PASSWORD_KUAT';
+CREATE DATABASE monitoring OWNER monitoring;
+\c monitoring
 CREATE EXTENSION IF NOT EXISTS postgis;
-GRANT ALL PRIVILEGES ON DATABASE fiber_monitor TO fiber_monitor;
+GRANT ALL PRIVILEGES ON DATABASE monitoring TO monitoring;
 SQL
 ```
 
 ### Set `.env`
 
 ```ini
-DATABASE_URL=postgres://fiber_monitor:GANTI_PASSWORD_KUAT@localhost:5432/fiber_monitor?sslmode=disable
+DATABASE_URL=postgres://monitoring:GANTI_PASSWORD_KUAT@localhost:5432/monitoring?sslmode=disable
 ```
 
 Saat backend start, otomatis:
 
-1. Konek ke database `fiber_monitor`
+1. Konek ke database `monitoring`
 2. Jalankan migrasi (tabel, enum, index)
 3. Buat admin user dari `.env`
 
@@ -159,7 +159,7 @@ sudo crontab -e
 Tambah baris ini (backup setiap jam 2 malam):
 
 ```
-0 2 * * * pg_dump "postgres://fiber_monitor:PASSWORD@localhost:5432/fiber_monitor" | gzip > /var/backups/fiber-monitor_$(date +\%Y\%m\%d).sql.gz 2>/dev/null
+0 2 * * * pg_dump "postgres://monitoring:PASSWORD@localhost:5432/monitoring" | gzip > /var/backups/monitoring_$(date +\%Y\%m\%d).sql.gz 2>/dev/null
 ```
 
 Buat folder backup:
@@ -175,11 +175,11 @@ sudo mkdir -p /var/backups
 | Masalah | Solusi |
 |---|---|
 | `FATAL: password authentication failed` | Cek `DATABASE_URL` di `.env` cocok dengan user/password PostgreSQL |
-| `database "fiber_monitor" does not exist` | Buat ulang database (lihat atas) lalu restart: `pm2 restart fiber-monitor` |
+| `database "monitoring" does not exist` | Buat ulang database (lihat atas) lalu restart: `pm2 restart monitoring` |
 | `connection refused` | Pastikan `systemctl start postgresql` berjalan |
-| `relation "users" does not exist` | Migrasi belum jalan, cek log: `pm2 logs fiber-monitor` |
-| `permission denied for table` | `sudo -u postgres psql -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO fiber_monitor;"` |
-| `PostGIS extension not found` | `sudo -u postgres psql -d fiber_monitor -c "CREATE EXTENSION postgis;"` |
+| `relation "users" does not exist` | Migrasi belum jalan, cek log: `pm2 logs monitoring` |
+| `permission denied for table` | `sudo -u postgres psql -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO monitoring;"` |
+| `PostGIS extension not found` | `sudo -u postgres psql -d monitoring -c "CREATE EXTENSION postgis;"` |
 
 ### Reset database (fresh start)
 
@@ -187,10 +187,10 @@ sudo mkdir -p /var/backups
 
 ```bash
 sudo -u postgres psql <<'SQL'
-DROP DATABASE fiber_monitor;
-CREATE DATABASE fiber_monitor OWNER fiber_monitor;
-\c fiber_monitor
+DROP DATABASE monitoring;
+CREATE DATABASE monitoring OWNER monitoring;
+\c monitoring
 CREATE EXTENSION IF NOT EXISTS postgis;
 SQL
-pm2 restart fiber-monitor
+pm2 restart monitoring
 ```

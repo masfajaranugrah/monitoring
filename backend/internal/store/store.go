@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"fiber-monitor/internal/database"
-	"fiber-monitor/internal/ping"
+	"monitoring/internal/database"
+	"monitoring/internal/ping"
 )
 
 // Store implements the ping.Storer interface against PostgreSQL.

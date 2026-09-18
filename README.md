@@ -1,4 +1,4 @@
-# Fiber Monitor — ISP Customer Connection Monitoring
+# Monitoring — ISP Customer Connection Monitoring
 
 Aplikasi **production-ready** untuk memonitor koneksi pelanggan ISP dari sebuah VPS/Linux.
 Server monitoring terhubung ke jaringan pelanggan melalui **VPN MikroTik L2TP/SSTP** (hingga 10 VPN aktif),
@@ -95,8 +95,8 @@ monitoring/
 │   │   └── router/
 │   ├── package.json
 │   └── vite.config.js
-├── nginx/fiber-monitor.conf
-├── deployment/fiber-monitor.service
+├── nginx/monitoring.conf
+├── deployment/monitoring.service
 ├── ecosystem.config.cjs          # konfigurasi PM2
 ├── DEPLOY-PM2.md                 # panduan deploy tanpa Docker
 ├── Makefile
@@ -122,7 +122,7 @@ Klien VPN: xl2tpd (L2TP), sstp-client (SSTP)
 Panduan lengkap: [`DEPLOY-PM2.md`](DEPLOY-PM2.md). Ringkasnya:
 
 ```bash
-git clone <url-repo> fiber-monitor && cd fiber-monitor
+git clone <url-repo> monitoring && cd monitoring
 
 # 1. Environment
 cp .env.example .env
@@ -148,7 +148,7 @@ Akses: `http://SERVER_IP:8080` — login `admin` / `admin123` (ubah setelah logi
 - Backend Go melayani REST API **dan** SPA, cukup satu proses PM2.
 - Monitoring engine tetap berjalan walau browser ditutup.
 - ICMP ping / VPN butuh root atau `cap_net_raw,cap_net_admin`; jalankan PM2 sebagai
-  root atau `sudo setcap cap_net_raw,cap_net_admin+eip bin/fiber-monitor-server`.
+  root atau `sudo setcap cap_net_raw,cap_net_admin+eip bin/monitoring-server`.
 - Deploy ulang cukup: `make deploy`.
 
 ---
@@ -163,7 +163,7 @@ sudo apt install -y postgresql postgis golang nodejs npm nginx xl2tpd sstp-clien
 # 2. Database
 sudo -u postgres psql <<'SQL'
 CREATE USER monitor WITH PASSWORD 'monitor123';
-CREATE DATABASE fiber_monitor OWNER monitor;
+CREATE DATABASE monitoring OWNER monitor;
 CREATE EXTENSION IF NOT EXISTS postgis;
 SQL
 
@@ -174,12 +174,12 @@ make build
 make sync-dist
 
 # 4. Jalankan
-./bin/fiber-monitor-server
+./bin/monitoring-server
 curl http://127.0.0.1:8080/health   # cek
 
 # 5. Nginx reverse proxy
-sudo cp nginx/fiber-monitor.conf /etc/nginx/sites-available/fiber-monitor
-sudo ln -s /etc/nginx/sites-available/fiber-monitor /etc/nginx/sites-enabled/
+sudo cp nginx/monitoring.conf /etc/nginx/sites-available/monitoring
+sudo ln -s /etc/nginx/sites-available/monitoring /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 

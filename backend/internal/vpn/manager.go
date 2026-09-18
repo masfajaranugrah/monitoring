@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"fiber-monitor/internal/models"
-	"fiber-monitor/internal/ping"
+	"monitoring/internal/models"
+	"monitoring/internal/ping"
 )
 
 // Manager controls Linux VPN tunnels (L2TP via xl2tpd, SSTP via sstpc,

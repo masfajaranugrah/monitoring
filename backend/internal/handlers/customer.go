@@ -13,8 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"fiber-monitor/internal/database"
-	"fiber-monitor/internal/models"
+	"monitoring/internal/database"
+	"monitoring/internal/models"
 )
 
 func validateIP(ip string) bool {

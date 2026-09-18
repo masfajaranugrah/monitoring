@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-#  Fiber Monitor — Development runner (macOS/Homebrew)
+#  Monitoring — Development runner (macOS/Homebrew)
 #  Menjalankan PostgreSQL + PostGIS lokal, build backend, run.
 #
 #  Penggunaan:
@@ -51,10 +51,10 @@ ensure_db() {
 
   # Buat database + postgis bila belum ada
   if ! "$PGBIN/psql" -h "$PGDATA" -p "$PGPORT" -U monitor -d postgres -tAc \
-       "SELECT 1 FROM pg_database WHERE datname='fiber_monitor'" | grep -q 1; then
-    echo "==> Create database fiber_monitor"
-    "$PGBIN/createdb" -h "$PGDATA" -p "$PGPORT" -U monitor fiber_monitor
-    "$PGBIN/psql" -h "$PGDATA" -p "$PGPORT" -U monitor -d fiber_monitor \
+       "SELECT 1 FROM pg_database WHERE datname='monitoring'" | grep -q 1; then
+    echo "==> Create database monitoring"
+    "$PGBIN/createdb" -h "$PGDATA" -p "$PGPORT" -U monitor monitoring
+    "$PGBIN/psql" -h "$PGDATA" -p "$PGPORT" -U monitor -d monitoring \
       -c "CREATE EXTENSION IF NOT EXISTS postgis;" >/dev/null
   fi
 }
@@ -69,13 +69,13 @@ start_backend() {
     return
   fi
   echo "==> Build backend..."
-  (cd "$ROOT/backend" && go build -o "$ROOT/.data/fiber-monitor-server" ./cmd/server)
+  (cd "$ROOT/backend" && go build -o "$ROOT/.data/monitoring-server" ./cmd/server)
 
   # .env lokal bila belum ada
   [[ -f "$ROOT/.env" ]] || { echo "==> Salin .env.example -> .env"; cp "$ROOT/.env.example" "$ROOT/.env"; }
 
   # Pastikan DATABASE_URL sesuai postgres lokal (port $PGPORT)
-  export DATABASE_URL="postgres://monitor@127.0.0.1:$PGPORT/fiber_monitor?sslmode=disable"
+  export DATABASE_URL="postgres://monitor@127.0.0.1:$PGPORT/monitoring?sslmode=disable"
   export SERVER_PORT="${SERVER_PORT:-8080}"
   export GIN_MODE="${GIN_MODE:-release}"
   export JWT_SECRET="${JWT_SECRET:-local-dev-secret-change-me-0123456789abcdef}"
@@ -85,7 +85,7 @@ start_backend() {
   export ADMIN_INITIAL_PASSWORD="${ADMIN_INITIAL_PASSWORD:-admin123}"
 
   echo "==> Start backend (http://localhost:$SERVER_PORT)"
-  nohup "$ROOT/.data/fiber-monitor-server" > "$LOG_DIR/backend.log" 2>&1 &
+  nohup "$ROOT/.data/monitoring-server" > "$LOG_DIR/backend.log" 2>&1 &
   echo $! > "$DATA_DIR/backend.pid"
   sleep 2
   echo "==> Backend log:"
@@ -97,7 +97,7 @@ case "${1:-start}" in
     ensure_db
     start_backend
     echo ""
-    echo "▓▓ Fiber Monitor ▓▓"
+    echo "▓▓ Monitoring ▓▓"
     echo "  Backend : http://localhost:${SERVER_PORT:-8080}  (API + SPA)"
     echo "  Login   : admin / admin123  (ubah setelah login)"
     echo ""

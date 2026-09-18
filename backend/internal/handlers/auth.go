@@ -8,10 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 
-	"fiber-monitor/internal/config"
-	"fiber-monitor/internal/database"
-	"fiber-monitor/internal/middleware"
-	"fiber-monitor/internal/models"
+	"monitoring/internal/config"
+	"monitoring/internal/database"
+	"monitoring/internal/middleware"
+	"monitoring/internal/models"
 )
 
 const msQueryTimeout = 5 * time.Second

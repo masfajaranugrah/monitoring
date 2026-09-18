@@ -1,6 +1,6 @@
 # Deployment Guide — Debian 12 (Produksi)
 
-Panduan lengkap men-deploy Fiber Monitor pada server Debian 12 untuk produksi.
+Panduan lengkap men-deploy Monitoring pada server Debian 12 untuk produksi.
 
 ---
 
@@ -58,12 +58,12 @@ sudo apt install -y \
 ```bash
 sudo -u postgres psql <<'SQL'
 CREATE USER monitor WITH PASSWORD '<STRONG_DB_PASSWORD>';
-CREATE DATABASE fiber_monitor OWNER monitor;
-GRANT ALL PRIVILEGES ON DATABASE fiber_monitor TO monitor;
+CREATE DATABASE monitoring OWNER monitor;
+GRANT ALL PRIVILEGES ON DATABASE monitoring TO monitor;
 SQL
 # Jalankan dua perintah berikut sebagai user postgres:
-#   psql fiber_monitor -c 'CREATE EXTENSION IF NOT EXISTS postgis;'
-sudo -u postgres psql fiber_monitor -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+#   psql monitoring -c 'CREATE EXTENSION IF NOT EXISTS postgis;'
+sudo -u postgres psql monitoring -c "CREATE EXTENSION IF NOT EXISTS postgis;"
 ```
 
 Disarankan membuat user DB khusus (bukan root).
@@ -73,10 +73,10 @@ Disarankan membuat user DB khusus (bukan root).
 ## 4. Deploy Aplikasi
 
 ```bash
-sudo mkdir -p /opt/fiber-monitor
-sudo chown $(whoami) /opt/fiber-monitor
-cp -r backend frontend nginx deployment Makefile /opt/fiber-monitor/
-cd /opt/fiber-monitor
+sudo mkdir -p /opt/monitoring
+sudo chown $(whoami) /opt/monitoring
+cp -r backend frontend nginx deployment Makefile /opt/monitoring/
+cd /opt/monitoring
 cp .env.example .env
 ```
 
@@ -86,7 +86,7 @@ cp .env.example .env
 SERVER_PORT=8080
 GIN_MODE=release
 
-DATABASE_URL=postgres://monitor:<STRONG_DB_PASSWORD>@localhost:5432/fiber_monitor?sslmode=disable
+DATABASE_URL=postgres://monitor:<STRONG_DB_PASSWORD>@localhost:5432/monitoring?sslmode=disable
 
 JWT_SECRET=<openssl rand -base64 48>
 JWT_EXPIRY_HOURS=24
@@ -103,13 +103,13 @@ PING_HISTORY_RETENTION_DAYS=7
 Simpan file `.env` dengan permission ketat:
 
 ```bash
-chmod 600 /opt/fiber-monitor/.env
+chmod 600 /opt/monitoring/.env
 ```
 
 ### Build
 
 ```bash
-cd backend && go mod download && go build -o ../fiber-monitor-server ./cmd/server && cd ..
+cd backend && go mod download && go build -o ../monitoring-server ./cmd/server && cd ..
 cd frontend && npm ci && npm run build && cd ..
 mkdir -p web && cp -r frontend/dist/* web/
 ```
@@ -121,7 +121,7 @@ mkdir -p web && cp -r frontend/dist/* web/
 Opsional — supaya service tidak perlu `User=root`:
 
 ```bash
-sudo setcap cap_net_raw+ep /opt/fiber-monitor/fiber-monitor-server
+sudo setcap cap_net_raw+ep /opt/monitoring/monitoring-server
 ```
 
 Namun untuk **VPN tunnel (interface up/down)** tetap wajib `NET_ADMIN`
@@ -135,10 +135,10 @@ Namun untuk **VPN tunnel (interface up/down)** tetap wajib `NET_ADMIN`
 ## 6. Systemd
 
 ```bash
-sudo cp deployment/fiber-monitor.service /etc/systemd/system/fiber-monitor.service
+sudo cp deployment/monitoring.service /etc/systemd/system/monitoring.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now fiber-monitor
-sudo journalctl -u fiber-monitor -f
+sudo systemctl enable --now monitoring
+sudo journalctl -u monitoring -f
 ```
 
 Cek kesehatan:
@@ -153,10 +153,10 @@ curl http://127.0.0.1:8080/health
 ## 7. Nginx + HTTPS (Let's Encrypt)
 
 ```bash
-sudo cp nginx/fiber-monitor.conf /etc/nginx/sites-available/fiber-monitor
-sudo ln -s /etc/nginx/sites-available/fiber-monitor /etc/nginx/sites-enabled/
+sudo cp nginx/monitoring.conf /etc/nginx/sites-available/monitoring
+sudo ln -s /etc/nginx/sites-available/monitoring /etc/nginx/sites-enabled/
 # Ganti server_name di konfigurasi
-sudo sed -i 's/monitor.example.com/YOUR_DOMAIN/g' /etc/nginx/sites-available/fiber-monitor
+sudo sed -i 's/monitor.example.com/YOUR_DOMAIN/g' /etc/nginx/sites-available/monitoring
 sudo nginx -t && sudo systemctl reload nginx
 
 # Let's Encrypt
@@ -176,19 +176,19 @@ Konfigurasi nginx sudah:
 ### Backup database harian (crontab)
 
 ```bash
-# /etc/cron.d/fiber-monitor-backup
-30 2 * * * root  pg_dump -Fc postgres://monitor:...@localhost/fiber_monitor \
-  | gzip > /var/backups/fiber_monitor_$(date +\%F).gz && \
-  find /var/backups -name 'fiber_monitor_*.gz' -mtime +14 -delete
+# /etc/cron.d/monitoring-backup
+30 2 * * * root  pg_dump -Fc postgres://monitor:...@localhost/monitoring \
+  | gzip > /var/backups/monitoring_$(date +\%F).gz && \
+  find /var/backups -name 'monitoring_*.gz' -mtime +14 -delete
 ```
 
 ### Monitoring service
 
 ```bash
 # Status
-sudo systemctl status fiber-monitor
+sudo systemctl status monitoring
 # Relog
-sudo journalctl -u fiber-monitor -f
+sudo journalctl -u monitoring -f
 ```
 
 ---

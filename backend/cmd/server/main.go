@@ -12,15 +12,15 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"fiber-monitor/internal/config"
-	"fiber-monitor/internal/crypto"
-	"fiber-monitor/internal/database"
-	"fiber-monitor/internal/handlers"
-	"fiber-monitor/internal/middleware"
-	"fiber-monitor/internal/ping"
-	"fiber-monitor/internal/sse"
-	"fiber-monitor/internal/store"
-	"fiber-monitor/internal/vpn"
+	"monitoring/internal/config"
+	"monitoring/internal/crypto"
+	"monitoring/internal/database"
+	"monitoring/internal/handlers"
+	"monitoring/internal/middleware"
+	"monitoring/internal/ping"
+	"monitoring/internal/sse"
+	"monitoring/internal/store"
+	"monitoring/internal/vpn"
 )
 
 func main() {
@@ -157,7 +157,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("fiber-monitor API listening on :%s", cfg.ServerPort)
+		log.Printf("monitoring API listening on :%s", cfg.ServerPort)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[fatal] server error: %v", err)
 		}
