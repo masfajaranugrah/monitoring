@@ -205,8 +205,8 @@ novj
 novjccomp
 require-mppe-128
 refuse-eap
-lcp-echo-interval 60
-lcp-echo-failure 3
+lcp-echo-interval 10
+lcp-echo-failure 6
 mtu 1400
 mru 1400
 persist
