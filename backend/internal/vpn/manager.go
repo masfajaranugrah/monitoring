@@ -78,6 +78,16 @@ func (m *Manager) Connect(v *models.VPNConnection, password string) error {
 	return nil
 }
 
+// parseIPorCIDR accepts either a bare IP (ppp interfaces show "inet X" without
+// a prefix length) or CIDR notation.
+func parseIPorCIDR(s string) (net.IP, bool) {
+	if ip := net.ParseIP(s); ip != nil {
+		return ip, true
+	}
+	ip, _, err := net.ParseCIDR(s)
+	return ip, err == nil && ip != nil
+}
+
 // snapshotPPP returns name -> hasIPv4 for every current ppp interface. Names
 // alone are unreliable because pppd reuses ppp0 immediately after the old
 // process dies, so we key on IP presence: a tunnel only counts as up when a
@@ -98,8 +108,7 @@ func snapshotPPP() map[string]bool {
 		if !strings.HasPrefix(name, "ppp") || family != "inet" {
 			continue
 		}
-		ip, _, err := net.ParseCIDR(fields[3])
-		if err == nil && ip != nil {
+		if _, ok := parseIPorCIDR(fields[3]); ok {
 			up[name] = true
 		}
 	}
@@ -131,7 +140,7 @@ func (m *Manager) waitForNewPPP(before map[string]bool, timeout time.Duration) (
 			if before[name] {
 				continue
 			}
-			if ip, _, err := net.ParseCIDR(fields[3]); err == nil && ip != nil {
+			if _, ok := parseIPorCIDR(fields[3]); ok {
 				return name, true
 			}
 		}
@@ -399,8 +408,7 @@ func (m *Manager) interfaceIP(iface string) (string, error) {
 		if strings.HasPrefix(line, "inet ") {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
-				ip, _, err := net.ParseCIDR(fields[1])
-				if err == nil && ip != nil {
+				if ip, ok := parseIPorCIDR(fields[1]); ok {
 					return ip.String(), nil
 				}
 			}
