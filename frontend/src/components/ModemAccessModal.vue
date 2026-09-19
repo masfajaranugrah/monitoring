@@ -62,10 +62,6 @@ function useScheme(s) {
   bump()
 }
 
-function openNewTab() {
-  if (proxyUrl.value) window.open(proxyUrl.value, '_blank')
-}
-
 onMounted(bump)
 </script>
 
@@ -103,7 +99,6 @@ onMounted(bump)
 
         <div class="modem-bar__actions">
           <button type="button" class="btn btn--ghost btn--sm" @click="bump">Muat ulang</button>
-          <button type="button" class="btn btn--primary btn--sm" @click="openNewTab">Buka di tab baru</button>
         </div>
       </div>
 
@@ -114,8 +109,7 @@ onMounted(bump)
 
       <p class="modem-note">
         Halaman disajikan lewat server (same-origin) sehingga tidak ada masalah mixed-content maupun
-        X-Frame-Options. Jika tampak kosong, modem tidak dapat dijangkau server — coba ganti scheme/port,
-        atau gunakan <strong>Buka di tab baru</strong>.
+        X-Frame-Options. Jika tampak kosong, coba ganti scheme/port lalu <strong>Muat ulang</strong>.
       </p>
     </div>
   </div>

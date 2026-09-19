@@ -106,6 +106,14 @@ func ModemProxy(c *gin.Context) {
 	cookieName := "mdm_proxy_" + idStr
 	token := c.Query("token")
 	if token == "" {
+		if ah := c.GetHeader("Authorization"); ah != "" {
+			parts := strings.Split(ah, " ")
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				token = parts[1]
+			}
+		}
+	}
+	if token == "" {
 		if ck, cerr := c.Cookie(cookieName); cerr == nil && ck != "" {
 			token = ck
 		}
