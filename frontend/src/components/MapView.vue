@@ -517,6 +517,9 @@ async function onKmzFile(e) {
     }
     kmzMeta.value = { name: kmz.name, count: created.length }
     if (kmzDelEl) kmzDelEl.style.display = 'flex'
+    if (data.skipped) {
+      showGeoError(`${data.skipped} fitur tanpa geometri dilewati (folder kosong/ScreenOverlay)`)
+    }
   } catch (err) {
     showGeoError(`Gagal impor ${file.name}: ${err && err.message ? err.message : 'file tidak valid'}`)
   } finally {

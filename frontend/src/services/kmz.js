@@ -75,8 +75,12 @@ export async function parseKmzFile(file) {
   ;(geojson.features || []).forEach((feat, i) => {
     features.push(...extractFeature(feat, i))
   })
-  if (!features.length) {
+  // Buang elemen tanpa geometri (folder kosong, ScreenOverlay, dll.)
+  const valid = features.filter(
+    (f) => f.geometry && f.geometry.type && f.geometry.coordinates && f.geometry.coordinates.length
+  )
+  if (!valid.length) {
     throw new Error('KMZ/KML tidak mengandung fitur yang bisa dipetakan')
   }
-  return { name, features }
+  return { name, features: valid }
 }

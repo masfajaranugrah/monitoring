@@ -334,7 +334,7 @@ func BulkImportMapFeatures(c *gin.Context) {
 			Icon        string          `json:"icon"`
 			Color       string          `json:"color"`
 			Description string          `json:"description"`
-			Geometry    json.RawMessage `json:"geometry" binding:"required"`
+			Geometry    json.RawMessage `json:"geometry"`
 			Properties  json.RawMessage `json:"properties"`
 		} `json:"features" binding:"required"`
 		Source string `json:"source"`
@@ -369,7 +369,22 @@ func BulkImportMapFeatures(c *gin.Context) {
 	}
 
 	created := make([]map[string]interface{}, 0)
+	skipped := 0
 	for i, feat := range in.Features {
+		// Placemark/folder kosong di KMZ/KML tidak punya geometri -> dilewati,
+		// supaya satu elemen kosong tidak menggagalkan seluruh impor.
+		if len(feat.Geometry) == 0 || string(feat.Geometry) == "null" {
+			skipped++
+			continue
+		}
+		var g struct {
+			Type        string          `json:"type"`
+			Coordinates json.RawMessage `json:"coordinates"`
+		}
+		if err := json.Unmarshal(feat.Geometry, &g); err != nil || g.Type == "" || len(g.Coordinates) == 0 {
+			skipped++
+			continue
+		}
 		name := strings.TrimSpace(feat.Name)
 		if name == "" {
 			name = "Fitur " + strconv.Itoa(i+1)
@@ -414,10 +429,19 @@ func BulkImportMapFeatures(c *gin.Context) {
 		})
 	}
 
+	if len(created) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tidak ada fitur valid untuk diimpor"})
+		return
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal menyimpan impor"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": created})
+	resp := gin.H{"data": created}
+	if skipped > 0 {
+		resp["skipped"] = skipped
+	}
+	c.JSON(http.StatusCreated, resp)
 }
