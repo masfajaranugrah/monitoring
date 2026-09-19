@@ -47,17 +47,24 @@ function handleUnlock() {
 
 function playBellOnce() {
   const a = ensureAudio()
-  try {
-    a.currentTime = 0
-    a.volume = 1
-    const p = a.play()
-    if (p && typeof p.catch === 'function') {
-      p.catch(() => {
-        if (!unlocked) pendingAlarm = true
-      })
+  const attempt = () => {
+    try {
+      a.currentTime = 0
+      a.volume = 1
+      const p = a.play()
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => {
+          if (!unlocked) pendingAlarm = true
+        })
+      }
+    } catch (e) {
+      if (!unlocked) pendingAlarm = true
     }
-  } catch (e) {
-    if (!unlocked) pendingAlarm = true
+  }
+  if (a.readyState >= 2) {
+    attempt()
+  } else {
+    a.addEventListener('canplay', attempt, { once: true })
   }
 }
 

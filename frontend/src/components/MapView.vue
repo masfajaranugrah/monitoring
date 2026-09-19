@@ -243,6 +243,23 @@ function showGeoError(msg) {
   setTimeout(() => popup.remove(), 3200)
 }
 
+const LocateControl = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const btn = L.DomUtil.create('button', 'map-locate-btn leaflet-bar')
+    btn.type = 'button'
+    btn.title = 'Pusatkan ke lokasi saya'
+    btn.setAttribute('aria-label', 'Pusatkan ke lokasi saya')
+    btn.innerHTML =
+      '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2v3.2M12 18.8V22M2 12h3.2M18.8 12H22"></path></svg>'
+    btn.addEventListener('click', () => {
+      if (!locating.value) locate()
+    })
+    L.DomEvent.disableClickPropagation(btn)
+    return btn
+  }
+})
+
 function locate() {
   if (!map || locating.value) return
   if (!('geolocation' in navigator)) {
@@ -296,6 +313,8 @@ onMounted(() => {
     .layers(BASE_LAYERS, null, { position: 'bottomright', collapsed: false })
     .addTo(map)
 
+  map.addControl(new LocateControl())
+
   BASE_LAYERS['OpenStreetMap'].addTo(map)
 
   markers = L.markerClusterGroup({ disableClusteringAtZoom: 10, chunkedLoading: true })
@@ -334,18 +353,5 @@ defineExpose({ focusCustomer, flyTo, getView, locate })
 <template>
   <div class="monitor-map-wrap">
     <div ref="mapEl" class="monitor-map" :class="{ 'monitor-map--clickable': clickToAdd }"></div>
-    <button
-      class="monitor-map__locate"
-      type="button"
-      :disabled="locating"
-      :aria-label="locating ? 'Mencari lokasi…' : 'Pusatkan ke lokasi saya'"
-      :title="locating ? 'Mencari lokasi…' : 'Pusatkan ke lokasi saya'"
-      @click="locate"
-    >
-      <svg viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="3.2"></circle>
-        <path d="M12 2v3.2M12 18.8V22M2 12h3.2M18.8 12H22"></path>
-      </svg>
-    </button>
   </div>
 </template>
