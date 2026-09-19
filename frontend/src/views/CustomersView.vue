@@ -8,6 +8,7 @@ import { useMonitorStore } from '../stores/monitor'
 import { useAuthStore } from '../stores/auth'
 import { CUSTOMER_ICONS, customerIconSvg, statusColor } from '../services/customerIcons'
 import ModemAccessModal from '../components/ModemAccessModal.vue'
+import ModemViewerModal from '../components/ModemViewerModal.vue'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -28,6 +29,7 @@ const sortOrder = ref('asc')
 const loading = ref(true)
 const showModal = ref(false)
 const modemCustomer = ref(null)
+const viewerCustomer = ref(null)
 const editing = ref(null)
 const form = ref(emptyForm())
 const saving = ref(false)
@@ -48,7 +50,14 @@ function emptyForm() {
     monitoring_enabled: true,
     ping_interval: 10,
     timeout_ms: 2000,
-    retry_count: 2
+    retry_count: 2,
+    modem_web_user: '',
+    modem_web_pass: '',
+    modem_web_port: 80,
+    modem_web_https: false,
+    modem_telnet_user: '',
+    modem_telnet_pass: '',
+    modem_telnet_port: 23
   }
 }
 
@@ -120,7 +129,14 @@ function openEdit(c) {
     monitoring_enabled: c.monitoring_enabled,
     ping_interval: c.ping_interval,
     timeout_ms: c.timeout_ms,
-    retry_count: c.retry_count
+    retry_count: c.retry_count,
+    modem_web_user: c.modem_web_user || '',
+    modem_web_pass: '',
+    modem_web_port: c.modem_web_port || 80,
+    modem_web_https: !!c.modem_web_https,
+    modem_telnet_user: c.modem_telnet_user || '',
+    modem_telnet_pass: '',
+    modem_telnet_port: c.modem_telnet_port || 23
   }
   errorMsg.value = ''
   showModal.value = true
@@ -279,6 +295,10 @@ onMounted(() => {
                 <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2 15.5 7.5M21 2l-5 5-4-2-2.5 2.5 4 4L8 18l-4 1 2 2 2-1 2.5-2.5 4 4L17 18l-2-4 5-5z"/></svg>
                 Modem
               </button>
+              <button class="btn btn--ghost btn--sm" @click.stop="viewerCustomer = c" title="Lihat data modem (status, jaringan, diagnosis)">
+                <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg>
+                Data
+              </button>
               <button v-if="auth.isAdmin" class="btn btn--dangerghost btn--sm" @click.stop="deleting = c">Hapus</button>
             </td>
           </tr>
@@ -351,6 +371,41 @@ onMounted(() => {
             <label class="field field--full"><span>Deskripsi</span>
               <input v-model="form.description" />
             </label>
+
+            <div class="field field--full form-section">
+              <span>Akses Perangkat (Modem)</span>
+              <p class="form-section__hint">Dipakai API modem. Kosongkan agar memakai kredensial default server.</p>
+            </div>
+            <label class="field"><span>User Web</span>
+              <input v-model="form.modem_web_user" placeholder="admin" autocomplete="off" />
+            </label>
+            <label class="field"><span>Password Web</span>
+              <input
+                v-model="form.modem_web_pass"
+                type="password"
+                :placeholder="editing ? 'Kosongkan bila tidak diubah' : 'admin'"
+                autocomplete="new-password"
+              />
+            </label>
+            <label class="field"><span>Port Web</span>
+              <input v-model.number="form.modem_web_port" type="number" min="1" max="65535" />
+            </label>
+            <label class="check"><input type="checkbox" v-model="form.modem_web_https" /> Web HTTPS</label>
+            <label class="field"><span>User Telnet</span>
+              <input v-model="form.modem_telnet_user" placeholder="root" autocomplete="off" />
+            </label>
+            <label class="field"><span>Password Telnet</span>
+              <input
+                v-model="form.modem_telnet_pass"
+                type="password"
+                :placeholder="editing ? 'Kosongkan bila tidak diubah' : 'Zte521'"
+                autocomplete="new-password"
+              />
+            </label>
+            <label class="field"><span>Port Telnet</span>
+              <input v-model.number="form.modem_telnet_port" type="number" min="1" max="65535" />
+            </label>
+
             <label class="check"><input type="checkbox" v-model="form.monitoring_enabled" /> Monitoring aktif</label>
           </div>
           <p v-if="errorMsg" class="login__error">{{ errorMsg }}</p>
@@ -378,5 +433,6 @@ onMounted(() => {
     </div>
 
     <ModemAccessModal v-if="modemCustomer" :customer="modemCustomer" @close="modemCustomer = null" />
+    <ModemViewerModal v-if="viewerCustomer" :customer="viewerCustomer" @close="viewerCustomer = null" />
   </div>
 </template>

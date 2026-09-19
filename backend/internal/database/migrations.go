@@ -100,6 +100,18 @@ CREATE INDEX IF NOT EXISTS idx_customers_code ON customers(customer_code);
 -- Upgrade existing installations: add icon column if missing
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS icon VARCHAR(30) NOT NULL DEFAULT 'dot';
 
+-- Kredensial akses perangkat (modern ONT/ONU ZTE) per pelanggan. Password
+-- disimpan terenkripsi AES-256-GCM (lihat internal/crypto). Kosong berarti
+-- server memakai kredensial default dari environment.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS modem_web_user VARCHAR(100) DEFAULT '';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS modem_web_pass_encrypted TEXT DEFAULT '';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS modem_web_port INTEGER NOT NULL DEFAULT 80;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS modem_web_https BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS modem_telnet_user VARCHAR(100) DEFAULT '';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS modem_telnet_pass_encrypted TEXT DEFAULT '';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS modem_telnet_port INTEGER NOT NULL DEFAULT 23;
+
+
 CREATE TABLE IF NOT EXISTS ping_results (
   id BIGSERIAL PRIMARY KEY,
   customer_id BIGINT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,

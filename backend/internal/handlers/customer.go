@@ -13,9 +13,54 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"monitoring/internal/crypto"
 	"monitoring/internal/database"
 	"monitoring/internal/models"
 )
+
+// encryptSecretPtr mengenkripsi string rahasia; nil/string kosong → nil
+// (artinya: jangan ubah nilai lama saat update).
+func encryptSecretPtr(p *string) (*string, error) {
+	if p == nil {
+		return nil, nil
+	}
+	s := strings.TrimSpace(*p)
+	if s == "" {
+		return nil, nil
+	}
+	enc, err := crypto.Encrypt(s)
+	if err != nil {
+		return nil, err
+	}
+	return &enc, nil
+}
+
+// trimPtr menyalin pointer string dengan spasi dirapikan.
+func trimPtr(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	s := strings.TrimSpace(*p)
+	return &s
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
+func derefInt(p *int, d int) int {
+	if p == nil || *p <= 0 {
+		return d
+	}
+	return *p
+}
+
+func derefBool(p *bool) bool {
+	return p != nil && *p
+}
 
 func validateIP(ip string) bool {
 	parsed := net.ParseIP(ip)
@@ -139,6 +184,8 @@ func ListCustomers(c *gin.Context) {
 		       c.monitoring_enabled, c.ping_interval, c.timeout_ms, c.retry_count,
 		       c.status, c.latency_ms, c.last_check, c.last_online, c.last_offline,
 		       c.consecutive_failures, c.total_checks, c.uptime_percentage,
+		       COALESCE(c.modem_web_user, ''), c.modem_web_port, c.modem_web_https,
+		       COALESCE(c.modem_telnet_user, ''), c.modem_telnet_port,
 		       c.created_at, c.updated_at
 		FROM customers c
 		LEFT JOIN vpn_connections v ON v.id = c.vpn_id
@@ -164,6 +211,8 @@ func ListCustomers(c *gin.Context) {
 			&cu.TimeoutMs, &cu.RetryCount, &cu.Status, &cu.LatencyMs,
 			&cu.LastCheck, &cu.LastOnline, &cu.LastOffline,
 			&cu.ConsecutiveFailures, &cu.TotalChecks, &cu.UptimePercentage,
+			&cu.ModemWebUser, &cu.ModemWebPort, &cu.ModemWebHTTPS,
+			&cu.ModemTelnetUser, &cu.ModemTelnetPort,
 			&cu.CreatedAt, &cu.UpdatedAt,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan customer"})
@@ -229,17 +278,24 @@ func CreateCustomer(c *gin.Context) {
 	if strings.TrimSpace(input.CustomerCode) == "" {
 		input.CustomerCode = uniqueCustomerCode(ctx, generateCustomerCode(input.IPAddress))
 	}
+	webPassEnc, _ := encryptSecretPtr(input.ModemWebPass)
+	telnetPassEnc, _ := encryptSecretPtr(input.ModemTelnetPass)
 	err := database.Pool.QueryRow(ctx,
 		`INSERT INTO customers
 		 (customer_code, customer_name, ip_address, latitude, longitude, location,
-		  vpn_id, icon, description, monitoring_enabled, ping_interval, timeout_ms, retry_count)
+		  vpn_id, icon, description, monitoring_enabled, ping_interval, timeout_ms, retry_count,
+		  modem_web_user, modem_web_pass_encrypted, modem_web_port, modem_web_https,
+		  modem_telnet_user, modem_telnet_pass_encrypted, modem_telnet_port)
 		 VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($5, $4), 4326),
-		         $6, $7, $8, $9, $10, $11, $12)
+		         $6, $7, $8, $9, $10, $11, $12,
+		         $13, $14, $15, $16, $17, $18, $19)
 		 RETURNING id`,
 		input.CustomerCode, input.CustomerName, input.IPAddress,
 		input.Latitude, input.Longitude, vpnID, normalizeCustomerIcon(input.Icon),
 		input.Description,
 		input.MonitoringEnabled, input.PingInterval, input.TimeoutMs, input.RetryCount,
+		derefStr(input.ModemWebUser), derefStr(webPassEnc), derefInt(input.ModemWebPort, 80), derefBool(input.ModemWebHTTPS),
+		derefStr(input.ModemTelnetUser), derefStr(telnetPassEnc), derefInt(input.ModemTelnetPort, 23),
 	).Scan(&id)
 	if err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
@@ -281,6 +337,8 @@ func GetCustomer(c *gin.Context) {
 		        c.monitoring_enabled, c.ping_interval, c.timeout_ms, c.retry_count,
 		        c.status, c.latency_ms, c.last_check, c.last_online, c.last_offline,
 		        c.consecutive_failures, c.total_checks, c.uptime_percentage,
+		        COALESCE(c.modem_web_user, ''), c.modem_web_port, c.modem_web_https,
+		        COALESCE(c.modem_telnet_user, ''), c.modem_telnet_port,
 		        c.created_at, c.updated_at
 		 FROM customers c
 		 LEFT JOIN vpn_connections v ON v.id = c.vpn_id
@@ -291,6 +349,8 @@ func GetCustomer(c *gin.Context) {
 			&cu.TimeoutMs, &cu.RetryCount, &cu.Status, &cu.LatencyMs,
 			&cu.LastCheck, &cu.LastOnline, &cu.LastOffline,
 			&cu.ConsecutiveFailures, &cu.TotalChecks, &cu.UptimePercentage,
+			&cu.ModemWebUser, &cu.ModemWebPort, &cu.ModemWebHTTPS,
+			&cu.ModemTelnetUser, &cu.ModemTelnetPort,
 			&cu.CreatedAt, &cu.UpdatedAt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Customer not found"})
@@ -330,17 +390,30 @@ func UpdateCustomer(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), msQueryTimeout)
 	defer cancel()
 
+	webPassEnc, _ := encryptSecretPtr(input.ModemWebPass)
+	telnetPassEnc, _ := encryptSecretPtr(input.ModemTelnetPass)
 	tag, err := database.Pool.Exec(ctx,
 		`UPDATE customers SET customer_code=$1, customer_name=$2, ip_address=$3,
 		   latitude=$4, longitude=$5, location=ST_SetSRID(ST_MakePoint($5, $4), 4326),
 		   vpn_id=$6, icon=$7, description=$8, monitoring_enabled=$9, ping_interval=$10,
-		   timeout_ms=$11, retry_count=$12, updated_at=now()
-		 WHERE id = $13`,
+		   timeout_ms=$11, retry_count=$12,
+		   modem_web_user=COALESCE($13, modem_web_user),
+		   modem_web_pass_encrypted=COALESCE($14, modem_web_pass_encrypted),
+		   modem_web_port=COALESCE($15, modem_web_port),
+		   modem_web_https=COALESCE($16, modem_web_https),
+		   modem_telnet_user=COALESCE($17, modem_telnet_user),
+		   modem_telnet_pass_encrypted=COALESCE($18, modem_telnet_pass_encrypted),
+		   modem_telnet_port=COALESCE($19, modem_telnet_port),
+		   updated_at=now()
+		 WHERE id = $20`,
 		input.CustomerCode, input.CustomerName, input.IPAddress,
 		input.Latitude, input.Longitude, input.VpnID, normalizeCustomerIcon(input.Icon),
 		input.Description,
 		input.MonitoringEnabled, input.PingInterval, input.TimeoutMs,
-		input.RetryCount, id)
+		input.RetryCount,
+		trimPtr(input.ModemWebUser), webPassEnc, input.ModemWebPort, input.ModemWebHTTPS,
+		trimPtr(input.ModemTelnetUser), telnetPassEnc, input.ModemTelnetPort,
+		id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update customer"})
 		return

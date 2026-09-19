@@ -20,6 +20,7 @@ map dashboard bergaya NOC.
 | Detail pelanggan | Info lengkap + grafik latency + riwayat ping |
 | Ping history | Riwayat status & latency untuk hitung uptime |
 | Alert system | Event & log OFFLINE (siap di-extend ke Telegram/WhatsApp/Email) |
+| **Modem API** | **Kontrol penuh ONT ZTE ZXHN F663NV9: Status, Network, Security, Application, Manage, Diagnosis, Help (web + telnet)** |
 | Keamanan | JWT auth, hash bcrypt, password VPN terenkripsi AES-256-GCM |
 | Target skala | 10 VPN, 10.000+ pelanggan |
 
@@ -244,6 +245,165 @@ Return: `{ data, total, page, page_size, pages }`
 
 > `POST /api/customers` — field `customer_code` **opsional**. Jika dikosongkan, server
 > akan generate kode dari IP pelanggan (mis. `CO-10-10-10-55`) dan memastikan unik.
+
+---
+
+## Modem Management API — ZTE ZXHN F663NV9
+
+Seluruh menu Web UI perangkat ONT/ONU ZTE (model acuan **ZXHN F663NV9**) diekspos
+menjadi REST API. Client ada di `backend/internal/modem` dan mengakses perangkat
+lewat **dua jalur**:
+
+1. **Web management** (CGI/login token) — untuk aksi web (reboot, backup/restore,
+   upgrade firmware) dan data halaman.
+2. **Telnet + `sendcmd 1 DB`** — akses langsung database konfigurasi perangkat
+   (paling lengkap & stabil) untuk Status/Network/Security/Application/Manage/Diagnosis.
+
+Field database ZTE dinormalisasi: setiap tabel DB dipetakan menjadi
+`{ "table": "WLANCfg", "rows": [ { "SSID1": "...", ... } ] }`, sehingga variasi
+penamaan antar-firmware tidak mengubah bentuk response.
+
+### Kredensial
+
+Kredensial diambil berurutan dari:
+
+1. Data pelanggan (`modem_web_user`, `modem_web_pass`, `modem_telnet_user`,
+   `modem_telnet_pass`, `modem_web_port`, `modem_web_https`, `modem_telnet_port`)
+   — password web/telnet dienkripsi AES-256-GCM sebelum disimpan.
+2. Default environment `MODEM_WEB_USER`, `MODEM_WEB_PASS`, `MODEM_TELNET_USER`,
+   `MODEM_TELNET_PASS`, `MODEM_WEB_PORT`, `MODEM_WEB_HTTPS`, `MODEM_TELNET_PORT`.
+
+### Endpoint (prefix `/api/modems/<customer_id>`)
+
+Semua endpoint butuh `Authorization: Bearer <token>` dan VPN/routing server harus
+ bisa menjangkau IP pelanggan.
+
+| Method | Endpoint | Keterangan | Role |
+|---|---|---|---|
+| GET | `/api/modems/:id/features` | Katalog endpoint modem | – |
+| GET | `/api/modems/:id/probe` | Tes konektivitas web & telnet | – |
+| GET | `/api/modems/:id/help` | Info bantuan/versi perangkat | – |
+| GET | `/api/modems/:id/status/device` | Device Information | – |
+| GET | `/api/modems/:id/status/network-info` | Network Information | – |
+| GET | `/api/modems/:id/status/user-info` | User Information | – |
+| GET | `/api/modems/:id/status/voice` | Voice Message | – |
+| GET | `/api/modems/:id/status/remote-management` | Remote Management | – |
+| GET | `/api/modems/:id/network/wan` | Konfigurasi WAN | – |
+| POST | `/api/modems/:id/network/wan` | Ubah field WAN | ADMIN |
+| GET | `/api/modems/:id/network/lan` | LAN / DHCP | – |
+| POST | `/api/modems/:id/network/lan/dhcp` | Toggle DHCP server | ADMIN |
+| GET | `/api/modems/:id/network/wlan` | Konfigurasi WiFi 2.4G/5G | – |
+| POST | `/api/modems/:id/network/wlan/ssid` | Ubah SSID WiFi | ADMIN |
+| GET | `/api/modems/:id/network/routing` | Tabel routing | – |
+| GET | `/api/modems/:id/network/dns` | DNS / hosts | – |
+| GET | `/api/modems/:id/network/port-binding` | Port binding | – |
+| GET | `/api/modems/:id/security/firewall` | Firewall | – |
+| POST | `/api/modems/:id/security/firewall` | Toggle firewall | ADMIN |
+| GET | `/api/modems/:id/security/ip-filter` | IP filter | – |
+| GET | `/api/modems/:id/security/mac-filter` | MAC filter | – |
+| GET | `/api/modems/:id/security/url-filter` | URL filter | – |
+| GET | `/api/modems/:id/security/alg` | ALG | – |
+| POST | `/api/modems/:id/security/alg` | Toggle ALG | ADMIN |
+| GET | `/api/modems/:id/application/upnp` | UPnP | – |
+| POST | `/api/modems/:id/application/upnp` | Toggle UPnP | ADMIN |
+| GET | `/api/modems/:id/application/ddns` | DDNS | – |
+| GET | `/api/modems/:id/application/dmz` | DMZ host | – |
+| GET | `/api/modems/:id/application/port-forwarding` | Port forwarding | – |
+| GET | `/api/modems/:id/application/sntp` | SNTP / waktu | – |
+| GET | `/api/modems/:id/application/multicast` | Multicast / IGMP | – |
+| GET | `/api/modems/:id/application/usb` | USB storage | – |
+| GET | `/api/modems/:id/application/voip` | VoIP | – |
+| GET | `/api/modems/:id/manage/device` | Device management | – |
+| GET | `/api/modems/:id/manage/users` | User perangkat | – |
+| POST | `/api/modems/:id/manage/users` | Ubah user/password | ADMIN |
+| POST | `/api/modems/:id/manage/reboot` | Reboot perangkat | ADMIN |
+| POST | `/api/modems/:id/manage/factory-reset` | Factory reset | ADMIN |
+| GET | `/api/modems/:id/manage/config/backup` | Unduh config.bin | – |
+| POST | `/api/modems/:id/manage/config/restore` | Restore config (multipart `config`) | ADMIN |
+| POST | `/api/modems/:id/manage/firmware` | Upgrade firmware (multipart `firmware`) | ADMIN |
+| GET | `/api/modems/:id/manage/time` | Waktu perangkat | – |
+| POST | `/api/modems/:id/manage/time` | Set waktu perangkat | ADMIN |
+| GET | `/api/modems/:id/manage/log` | Log sistem | – |
+| POST | `/api/modems/:id/diagnosis/ping` | Ping dari sisi modem | – |
+| POST | `/api/modems/:id/diagnosis/traceroute` | Traceroute dari sisi modem | – |
+| GET | `/api/modems/:id/diagnosis/arp` | Tabel ARP | – |
+| GET | `/api/modems/:id/diagnosis/mac-table` | Tabel MAC/FDB | – |
+| GET | `/api/modems/:id/diagnosis/optical` | Daya optik & status PON | – |
+| GET | `/api/modems/:id/diagnosis/loopback` | Loopback detection | – |
+| POST | `/api/modems/:id/raw` | Perintah shell mentah (debug) | ADMIN |
+
+Contoh:
+
+```bash
+# Cek konektivitas perangkat pelanggan id=12
+curl -H "Authorization: Bearer $TOKEN" \
+  http://SERVER:8080/api/modems/12/probe
+
+# Baca konfigurasi WiFi
+curl -H "Authorization: Bearer $TOKEN" \
+  http://SERVER:8080/api/modems/12/network/wlan
+
+# Ping dari sisi modem
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"host":"8.8.8.8","count":4}' \
+  http://SERVER:8080/api/modems/12/diagnosis/ping
+
+# Unduh config perangkat
+curl -H "Authorization: Bearer $TOKEN" -OJ \
+  http://SERVER:8080/api/modems/12/manage/config/backup
+```
+
+Bentuk response seragam:
+
+```json
+{
+  "section": "status",
+  "feature": "device",
+  "title": "Device Information",
+  "source": "telnet",
+  "data": { "device_info": [ { "SerialNumber": "ZTEG...", "SoftwareVersion": "V2.2.0P1T8" } ] }
+}
+```
+
+`source` bernilai `web`, `telnet`, atau `combined` menandakan jalur yang berhasil.
+
+### Antarmuka (Frontend)
+
+Di halaman **Pelanggan**:
+
+- Tombol **Modem** — membuka proxy Web UI perangkat (iframe/tab baru, sesi login lama).
+- Tombol **Data** — membuka viewer data modem bertab (Status, Network, Security,
+  Application, Manage, Diagnosis, Help) dan tab **Aksi** untuk operasi tulis:
+  reboot, factory reset, toggle firewall/UPnP/DHCP/ALG, ubah SSID, set waktu,
+  ubah user perangkat, update field WAN, backup/restore config, upgrade firmware,
+  dan perintah telnet mentah. Tab **Aksi** hanya aktif untuk role ADMIN.
+- Kredensial modem per pelanggan diisi pada form Tambah/Edit Pelanggan bagian
+  **Akses Perangkat (Modem)**. Kosongkan password saat edit bila tidak ingin
+  mengubahnya.
+
+### CLI pengujian
+
+Untuk menguji langsung ke perangkat tanpa lewat API:
+
+```bash
+make build-modem
+./bin/monitoring-modem -host 192.168.1.1 -user admin -pass admin probe
+./bin/monitoring-modem -host 192.168.1.1 status device
+./bin/monitoring-modem -host 192.168.1.1 network wlan
+./bin/monitoring-modem -host 192.168.1.1 -target 8.8.8.8 diagnosis ping
+./bin/monitoring-modem -host 192.168.1.1 -tuser root -tpass Zte521 raw "sendcmd 1 DB get DeviceInfo"
+./bin/monitoring-modem features
+```
+
+### Catatan
+
+- Nama tabel DB ZTE berbeda antar-firmware/operator. Client memakai daftar
+  kandidat per fitur; bila firmware Anda memakai nama lain, sesuaikan daftar di
+  `backend/internal/modem/features_*.go`.
+- Aksi tulis (set/reboot/factory reset) memerlukan akun dengan hak admin dan
+  disarankan diuji lebih dulu lewat `/raw` atau CLI.
+- Jalur telnet butuh fitur telnet aktif di perangkat. Aktifkan lewat setelan
+  perangkat atau kredensial `root`.
 
 ---
 

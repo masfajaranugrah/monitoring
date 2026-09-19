@@ -24,7 +24,7 @@ import (
 )
 
 // version dipakai sebagai penanda build di /health untuk verifikasi deploy.
-const version = "1.3.0"
+const version = "1.4.0"
 
 func main() {
 	cfg := config.Load()
@@ -170,6 +170,78 @@ func main() {
 
 			// Web terminal (admin only)
 			auth.GET("/terminal/ws", middleware.AdminOnly(), handlers.TerminalWS)
+
+			// ---- Modem Management API (ZTE F663NV9 dkk) ----
+			// Mengakses seluruh menu Web UI perangkat (Status, Network, Security,
+			// Application, Manage, Diagnosis, Help) via jalur web + telnet.
+			modems := auth.Group("/modems/:id")
+			{
+				modems.GET("/features", handlers.ModemFeatures)
+				modems.GET("/probe", handlers.ModemProbe)
+				modems.GET("/help", handlers.ModemHelp)
+
+				// Status
+				modems.GET("/status/device", handlers.ModemStatusDevice)
+				modems.GET("/status/network-info", handlers.ModemStatusNetworkInfo)
+				modems.GET("/status/user-info", handlers.ModemStatusUserInfo)
+				modems.GET("/status/voice", handlers.ModemStatusVoice)
+				modems.GET("/status/remote-management", handlers.ModemStatusRemote)
+
+				// Network
+				modems.GET("/network/wan", handlers.ModemNetworkWAN)
+				modems.POST("/network/wan", middleware.AdminOnly(), handlers.ModemNetworkWANUpdate)
+				modems.GET("/network/lan", handlers.ModemNetworkLAN)
+				modems.POST("/network/lan/dhcp", middleware.AdminOnly(), handlers.ModemNetworkDHCPToggle)
+				modems.GET("/network/wlan", handlers.ModemNetworkWLAN)
+				modems.POST("/network/wlan/ssid", middleware.AdminOnly(), handlers.ModemNetworkSetSSID)
+				modems.GET("/network/routing", handlers.ModemNetworkRouting)
+				modems.GET("/network/dns", handlers.ModemNetworkDNS)
+				modems.GET("/network/port-binding", handlers.ModemNetworkPortBinding)
+
+				// Security
+				modems.GET("/security/firewall", handlers.ModemSecurityFirewall)
+				modems.POST("/security/firewall", middleware.AdminOnly(), handlers.ModemSecurityFirewallToggle)
+				modems.GET("/security/ip-filter", handlers.ModemSecurityIPFilter)
+				modems.GET("/security/mac-filter", handlers.ModemSecurityMACFilter)
+				modems.GET("/security/url-filter", handlers.ModemSecurityURLFilter)
+				modems.GET("/security/alg", handlers.ModemSecurityALG)
+				modems.POST("/security/alg", middleware.AdminOnly(), handlers.ModemSecurityALGToggle)
+
+				// Application
+				modems.GET("/application/upnp", handlers.ModemAppUPnP)
+				modems.POST("/application/upnp", middleware.AdminOnly(), handlers.ModemAppUPnPToggle)
+				modems.GET("/application/ddns", handlers.ModemAppDDNS)
+				modems.GET("/application/dmz", handlers.ModemAppDMZ)
+				modems.GET("/application/port-forwarding", handlers.ModemAppPortForwarding)
+				modems.GET("/application/sntp", handlers.ModemAppSNTP)
+				modems.GET("/application/multicast", handlers.ModemAppMulticast)
+				modems.GET("/application/usb", handlers.ModemAppUSB)
+				modems.GET("/application/voip", handlers.ModemAppVoIP)
+
+				// Manage
+				modems.GET("/manage/device", handlers.ModemManageDevice)
+				modems.GET("/manage/users", handlers.ModemManageUsers)
+				modems.POST("/manage/users", middleware.AdminOnly(), handlers.ModemManageUserUpdate)
+				modems.POST("/manage/reboot", middleware.AdminOnly(), handlers.ModemManageReboot)
+				modems.POST("/manage/factory-reset", middleware.AdminOnly(), handlers.ModemManageFactoryReset)
+				modems.GET("/manage/config/backup", handlers.ModemManageConfigBackup)
+				modems.POST("/manage/config/restore", middleware.AdminOnly(), handlers.ModemManageConfigRestore)
+				modems.POST("/manage/firmware", middleware.AdminOnly(), handlers.ModemManageFirmwareUpgrade)
+				modems.GET("/manage/time", handlers.ModemManageTime)
+				modems.POST("/manage/time", middleware.AdminOnly(), handlers.ModemManageSetTime)
+				modems.GET("/manage/log", handlers.ModemManageLog)
+
+				// Diagnosis
+				modems.POST("/diagnosis/ping", handlers.ModemDiagnosisPing)
+				modems.POST("/diagnosis/traceroute", handlers.ModemDiagnosisTraceroute)
+				modems.GET("/diagnosis/arp", handlers.ModemDiagnosisARP)
+				modems.GET("/diagnosis/mac-table", handlers.ModemDiagnosisMACTable)
+				modems.GET("/diagnosis/optical", handlers.ModemDiagnosisOptical)
+				modems.GET("/diagnosis/loopback", handlers.ModemDiagnosisLoopback)
+
+				// Raw telnet (admin, untuk debug)
+				modems.POST("/raw", middleware.AdminOnly(), handlers.ModemRaw)
+			}
 		}
 
 		// Modem proxy — autentikasi ditangani sendiri di handler (token via query

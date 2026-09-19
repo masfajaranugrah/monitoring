@@ -93,8 +93,14 @@ type Customer struct {
 	ConsecutiveFailures int        `json:"consecutive_failures"`
 	TotalChecks         int64      `json:"total_checks"`
 	UptimePercentage    float64    `json:"uptime_percentage"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	// Kredensial akses perangkat (tanpa password; password tidak pernah dikirim).
+	ModemWebUser    string    `json:"modem_web_user,omitempty"`
+	ModemWebPort    int       `json:"modem_web_port"`
+	ModemWebHTTPS   bool      `json:"modem_web_https"`
+	ModemTelnetUser string    `json:"modem_telnet_user,omitempty"`
+	ModemTelnetPort int       `json:"modem_telnet_port"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type PingResult struct {
@@ -150,6 +156,16 @@ type CustomerCreateInput struct {
 	PingInterval      int      `json:"ping_interval"`
 	TimeoutMs         int      `json:"timeout_ms"`
 	RetryCount        int      `json:"retry_count"`
+	// Kredensial modem (opsional). Password dienkripsi sebelum disimpan.
+	// Pointer dipakai agar update bisa membedakan "tidak dikirim" (pertahankan
+	// nilai lama) dari "dikosongkan".
+	ModemWebUser    *string `json:"modem_web_user"`
+	ModemWebPass    *string `json:"modem_web_pass"`
+	ModemWebPort    *int    `json:"modem_web_port"`
+	ModemWebHTTPS   *bool   `json:"modem_web_https"`
+	ModemTelnetUser *string `json:"modem_telnet_user"`
+	ModemTelnetPass *string `json:"modem_telnet_pass"`
+	ModemTelnetPort *int    `json:"modem_telnet_port"`
 }
 
 type VPNCreateInput struct {

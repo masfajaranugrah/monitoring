@@ -1,16 +1,21 @@
-.PHONY: build-backend build-frontend build run-dev run-backend stats tidy install sync-dist pm2-start pm2-reload pm2-stop pm2-logs deploy
+.PHONY: build-backend build-modem build-frontend build run-dev run-backend stats tidy install sync-dist pm2-start pm2-reload pm2-stop pm2-logs deploy
 
 # ==== Build Backend ====
 build-backend:
 	mkdir -p bin .data/logs
 	cd backend && go build -o ../bin/monitoring-server ./cmd/server
 
+# ==== Build CLI Modem (test perangkat ZTE) ====
+build-modem:
+	mkdir -p bin
+	cd backend && go build -o ../bin/monitoring-modem ./cmd/modem
+
 # ==== Build Frontend ====
 build-frontend:
 	cd frontend && npm ci && npm run build
 
 # ==== Build Keduanya ====
-build: build-backend build-frontend
+build: build-backend build-modem build-frontend
 	@echo "Build selesai. Backend di bin/, frontend di frontend/dist/"
 
 # ==== Jalankan Development ====
