@@ -3,9 +3,9 @@ import { ref, onMounted, computed, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import MapView from '../components/MapView.vue'
-import StatusBadge from '../components/StatusBadge.vue'
 import { useMonitorStore } from '../stores/monitor'
 import { useAreaSearch } from '../composables/useAreaSearch'
+import { customerIconSvg, statusColor } from '../services/customerIcons'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -182,7 +182,11 @@ onBeforeUnmount(() => {
             class="mapmon__item"
             @click="focusOnList(c)"
           >
-            <StatusBadge :status="c.status" />
+            <span
+              class="cust-icon"
+              :style="{ '--ic-color': statusColor(c.status) }"
+              v-html="customerIconSvg(c.icon || 'customer')"
+            ></span>
             <div class="mapmon__item-main">
               <strong>{{ c.customer_name }}</strong>
               <span>{{ c.customer_code }} · {{ c.ip_address }} · {{ c.vpn_name || '-' }}</span>

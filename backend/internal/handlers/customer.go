@@ -26,6 +26,18 @@ func validateCoord(lat, lng float64) bool {
 	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
 }
 
+var allowedCustomerIcons = map[string]bool{
+	"dot": true, "customer": true, "wifi": true, "jb": true, "router": true,
+	"server": true, "tower": true, "building": true, "home": true,
+}
+
+func normalizeCustomerIcon(icon string) string {
+	if icon == "" || !allowedCustomerIcons[icon] {
+		return "customer"
+	}
+	return icon
+}
+
 func generateCustomerCode(ip string) string {
 	replacer := strings.NewReplacer(".", "-", ":", "-", " ", "")
 	return "CO-" + replacer.Replace(ip)
@@ -123,7 +135,7 @@ func ListCustomers(c *gin.Context) {
 	queryArgs := append(args, offset, pageSize)
 	query := fmt.Sprintf(`
 		SELECT c.id, c.customer_code, c.customer_name, c.ip_address, c.latitude, c.longitude,
-		       c.vpn_id, COALESCE(v.name, ''), COALESCE(c.description, ''),
+		       c.vpn_id, COALESCE(v.name, ''), COALESCE(c.icon, ''), COALESCE(c.description, ''),
 		       c.monitoring_enabled, c.ping_interval, c.timeout_ms, c.retry_count,
 		       c.status, c.latency_ms, c.last_check, c.last_online, c.last_offline,
 		       c.consecutive_failures, c.total_checks, c.uptime_percentage,
@@ -148,7 +160,7 @@ func ListCustomers(c *gin.Context) {
 		if err := rows.Scan(
 			&cu.ID, &cu.CustomerCode, &cu.CustomerName, &cu.IPAddress,
 			&cu.Latitude, &cu.Longitude, &vpnID, &cu.VPNName,
-			&cu.Description, &cu.MonitoringEnabled, &cu.PingInterval,
+			&cu.Icon, &cu.Description, &cu.MonitoringEnabled, &cu.PingInterval,
 			&cu.TimeoutMs, &cu.RetryCount, &cu.Status, &cu.LatencyMs,
 			&cu.LastCheck, &cu.LastOnline, &cu.LastOffline,
 			&cu.ConsecutiveFailures, &cu.TotalChecks, &cu.UptimePercentage,
@@ -220,12 +232,13 @@ func CreateCustomer(c *gin.Context) {
 	err := database.Pool.QueryRow(ctx,
 		`INSERT INTO customers
 		 (customer_code, customer_name, ip_address, latitude, longitude, location,
-		  vpn_id, description, monitoring_enabled, ping_interval, timeout_ms, retry_count)
+		  vpn_id, icon, description, monitoring_enabled, ping_interval, timeout_ms, retry_count)
 		 VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($5, $4), 4326),
-		         $6, $7, $8, $9, $10, $11)
+		         $6, $7, $8, $9, $10, $11, $12)
 		 RETURNING id`,
 		input.CustomerCode, input.CustomerName, input.IPAddress,
-		input.Latitude, input.Longitude, vpnID, input.Description,
+		input.Latitude, input.Longitude, vpnID, normalizeCustomerIcon(input.Icon),
+		input.Description,
 		input.MonitoringEnabled, input.PingInterval, input.TimeoutMs, input.RetryCount,
 	).Scan(&id)
 	if err != nil {
@@ -264,7 +277,7 @@ func GetCustomer(c *gin.Context) {
 	var vpnID sql.NullInt64
 	err = database.Pool.QueryRow(ctx,
 		`SELECT c.id, c.customer_code, c.customer_name, c.ip_address, c.latitude, c.longitude,
-		        c.vpn_id, COALESCE(v.name, ''), COALESCE(c.description, ''),
+		        c.vpn_id, COALESCE(v.name, ''), COALESCE(c.icon, ''), COALESCE(c.description, ''),
 		        c.monitoring_enabled, c.ping_interval, c.timeout_ms, c.retry_count,
 		        c.status, c.latency_ms, c.last_check, c.last_online, c.last_offline,
 		        c.consecutive_failures, c.total_checks, c.uptime_percentage,
@@ -274,7 +287,7 @@ func GetCustomer(c *gin.Context) {
 		 WHERE c.id = $1`, id).
 		Scan(&cu.ID, &cu.CustomerCode, &cu.CustomerName, &cu.IPAddress,
 			&cu.Latitude, &cu.Longitude, &vpnID, &cu.VPNName,
-			&cu.Description, &cu.MonitoringEnabled, &cu.PingInterval,
+			&cu.Icon, &cu.Description, &cu.MonitoringEnabled, &cu.PingInterval,
 			&cu.TimeoutMs, &cu.RetryCount, &cu.Status, &cu.LatencyMs,
 			&cu.LastCheck, &cu.LastOnline, &cu.LastOffline,
 			&cu.ConsecutiveFailures, &cu.TotalChecks, &cu.UptimePercentage,
@@ -320,11 +333,12 @@ func UpdateCustomer(c *gin.Context) {
 	tag, err := database.Pool.Exec(ctx,
 		`UPDATE customers SET customer_code=$1, customer_name=$2, ip_address=$3,
 		   latitude=$4, longitude=$5, location=ST_SetSRID(ST_MakePoint($5, $4), 4326),
-		   vpn_id=$6, description=$7, monitoring_enabled=$8, ping_interval=$9,
-		   timeout_ms=$10, retry_count=$11, updated_at=now()
-		 WHERE id = $12`,
+		   vpn_id=$6, icon=$7, description=$8, monitoring_enabled=$9, ping_interval=$10,
+		   timeout_ms=$11, retry_count=$12, updated_at=now()
+		 WHERE id = $13`,
 		input.CustomerCode, input.CustomerName, input.IPAddress,
-		input.Latitude, input.Longitude, input.VpnID, input.Description,
+		input.Latitude, input.Longitude, input.VpnID, normalizeCustomerIcon(input.Icon),
+		input.Description,
 		input.MonitoringEnabled, input.PingInterval, input.TimeoutMs,
 		input.RetryCount, id)
 	if err != nil {

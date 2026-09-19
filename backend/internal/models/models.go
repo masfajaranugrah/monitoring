@@ -79,6 +79,7 @@ type Customer struct {
 	Longitude           float64    `json:"longitude"`
 	VpnID               *int64     `json:"vpn_id,omitempty"`
 	VPNName             string     `json:"vpn_name,omitempty"`
+	Icon                string     `json:"icon,omitempty"`
 	Description         string     `json:"description,omitempty"`
 	MonitoringEnabled   bool       `json:"monitoring_enabled"`
 	PingInterval        int        `json:"ping_interval"`
@@ -143,6 +144,7 @@ type CustomerCreateInput struct {
 	Latitude          float64  `json:"latitude" binding:"required"`
 	Longitude         float64  `json:"longitude" binding:"required"`
 	VpnID             *int64   `json:"vpn_id"`
+	Icon              string   `json:"icon"`
 	Description       string   `json:"description"`
 	MonitoringEnabled bool     `json:"monitoring_enabled"`
 	PingInterval      int      `json:"ping_interval"`

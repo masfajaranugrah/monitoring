@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS customers (
   longitude DOUBLE PRECISION NOT NULL,
   location GEOMETRY(Point, 4326),
   vpn_id BIGINT REFERENCES vpn_connections(id) ON DELETE SET NULL,
+  icon VARCHAR(30) NOT NULL DEFAULT 'dot',
   description TEXT DEFAULT '',
   monitoring_enabled BOOLEAN NOT NULL DEFAULT true,
   ping_interval INTEGER NOT NULL DEFAULT 10,
@@ -95,6 +96,9 @@ CREATE INDEX IF NOT EXISTS idx_customers_vpn_id ON customers(vpn_id);
 CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
 CREATE INDEX IF NOT EXISTS idx_customers_location ON customers USING GIST(location);
 CREATE INDEX IF NOT EXISTS idx_customers_code ON customers(customer_code);
+
+-- Upgrade existing installations: add icon column if missing
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS icon VARCHAR(30) NOT NULL DEFAULT 'dot';
 
 CREATE TABLE IF NOT EXISTS ping_results (
   id BIGSERIAL PRIMARY KEY,

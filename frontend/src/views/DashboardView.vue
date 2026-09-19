@@ -3,9 +3,9 @@ import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import MapView from '../components/MapView.vue'
-import StatusBadge from '../components/StatusBadge.vue'
 import { useMonitorStore } from '../stores/monitor'
 import { useAreaSearch } from '../composables/useAreaSearch'
+import { CUSTOMER_ICONS, customerIconSvg, statusColor } from '../services/customerIcons'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -65,7 +65,7 @@ const statuses = ['ALL', 'ONLINE', 'OFFLINE', 'WARNING']
 
 const draft = ref(null)
 const showAddModal = ref(false)
-const addForm = ref({ customer_name: '', ip_address: '', vpn_id: '' })
+const addForm = ref({ customer_name: '', ip_address: '', vpn_id: '', icon: 'customer' })
 const saving = ref(false)
 const addError = ref('')
 
@@ -182,7 +182,7 @@ function openDetail(customer) {
 
 function onMapClick(pt) {
   draft.value = { lat: pt.lat, lng: pt.lng }
-  addForm.value = { customer_name: '', ip_address: '', vpn_id: '' }
+  addForm.value = { customer_name: '', ip_address: '', vpn_id: '', icon: 'customer' }
   addError.value = ''
   showAddModal.value = true
 }
@@ -201,6 +201,7 @@ async function saveCustomer() {
       customer_name: addForm.value.customer_name,
       ip_address: addForm.value.ip_address,
       vpn_id: addForm.value.vpn_id ? Number(addForm.value.vpn_id) : null,
+      icon: addForm.value.icon || 'customer',
       latitude: draft.value.lat,
       longitude: draft.value.lng,
       monitoring_enabled: true,
@@ -611,7 +612,11 @@ onUnmounted(() => {
               class="map-full__item"
               @click="focusFromFull(c)"
             >
-              <StatusBadge :status="c.status" />
+              <span
+                class="cust-icon"
+                :style="{ '--ic-color': statusColor(c.status) }"
+                v-html="customerIconSvg(c.icon || 'customer')"
+              ></span>
               <div class="map-full__item-main">
                 <strong>{{ c.customer_name }}</strong>
                 <span>{{ c.customer_code }} · {{ c.ip_address }} · {{ c.vpn_name || '-' }}</span>
@@ -652,6 +657,24 @@ onUnmounted(() => {
                 </option>
               </select>
             </label>
+            <div class="field">
+              <span>Ikon / Logo</span>
+              <div class="icon-picker">
+                <button
+                  v-for="ic in CUSTOMER_ICONS"
+                  :key="ic.value"
+                  type="button"
+                  class="icon-picker__item"
+                  :class="{ 'icon-picker__item--active': addForm.icon === ic.value }"
+                  :style="'--ic-color:currentColor'"
+                  :title="ic.label"
+                  @click="addForm.icon = ic.value"
+                >
+                  <span v-html="customerIconSvg(ic.value)"></span>
+                  <span>{{ ic.label }}</span>
+                </button>
+              </div>
+            </div>
           </div>
           <p v-if="addError" class="login__error">{{ addError }}</p>
           <div class="modal__actions">

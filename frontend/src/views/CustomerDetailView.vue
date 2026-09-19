@@ -5,6 +5,7 @@ import api from '../api'
 import StatusBadge from '../components/StatusBadge.vue'
 import LatencyBadge from '../components/LatencyBadge.vue'
 import LatencyChart from '../components/LatencyChart.vue'
+import { customerIconSvg, statusColor } from '../services/customerIcons'
 
 const props = defineProps({ id: { type: [String, Number], required: true } })
 const router = useRouter()
@@ -65,9 +66,16 @@ onUnmounted(() => {
 
   <div v-else class="detail">
     <div class="detail__head panel">
-      <div>
-        <h2>{{ customer.customer_name }}</h2>
-        <p class="mono">{{ customer.customer_code }} · {{ customer.ip_address }}</p>
+      <div class="detail__head-ident">
+        <span
+          class="cust-icon cust-icon--lg"
+          :style="{ '--ic-color': statusColor(customer.status) }"
+          v-html="customerIconSvg(customer.icon || 'customer')"
+        ></span>
+        <div>
+          <h2>{{ customer.customer_name }}</h2>
+          <p class="mono">{{ customer.customer_code }} · {{ customer.ip_address }}</p>
+        </div>
       </div>
       <div class="detail__head-right">
         <StatusBadge :status="customer.status" />

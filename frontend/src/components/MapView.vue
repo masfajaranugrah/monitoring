@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import L from 'leaflet'
 import 'leaflet.markercluster'
 import { parseKmzFile } from '../services/kmz'
+import { customerIconSvg, statusColor } from '../services/customerIcons'
 import api from '../api'
 
 const props = defineProps({
@@ -120,14 +121,15 @@ const filtered = computed(() => {
 })
 
 function divIcon(customer) {
-  const color = STATUS_COLORS[customer.status] || '#94a3b8'
+  const color = statusColor(customer.status)
   const pulse = customer.status === 'WARNING' ? ' map-marker--pulse' : ''
+  const svg = customerIconSvg(customer.icon || 'customer')
   return L.divIcon({
     className: '',
-    html: `<div class="map-marker${pulse}" style="--marker-color:${color}"><span class="map-marker__inner"></span></div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-    popupAnchor: [0, -14]
+    html: `<div class="map-marker map-marker--customer${pulse}" style="--marker-color:${color};--ic-color:${color}">${svg}</div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -18]
   })
 }
 

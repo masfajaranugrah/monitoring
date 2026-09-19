@@ -70,8 +70,8 @@ func MapCustomers(c *gin.Context) {
 	query := `
 		SELECT c.id, c.customer_code, c.customer_name, c.ip_address,
 		       c.latitude, c.longitude, c.vpn_id, COALESCE(v.name, ''),
-		       c.status, c.latency_ms, c.last_check, c.last_online, c.last_offline,
-		       c.uptime_percentage
+		       COALESCE(c.icon, ''), c.status, c.latency_ms, c.last_check,
+		       c.last_online, c.last_offline, c.uptime_percentage
 		FROM customers c
 		LEFT JOIN vpn_connections v ON v.id = c.vpn_id
 		WHERE 1=1`
@@ -101,7 +101,7 @@ func MapCustomers(c *gin.Context) {
 		var vpnID sql.NullInt64
 		if err := rows.Scan(&cu.ID, &cu.CustomerCode, &cu.CustomerName,
 			&cu.IPAddress, &cu.Latitude, &cu.Longitude, &vpnID, &cu.VPNName,
-			&cu.Status, &cu.LatencyMs, &cu.LastCheck, &cu.LastOnline,
+			&cu.Icon, &cu.Status, &cu.LatencyMs, &cu.LastCheck, &cu.LastOnline,
 			&cu.LastOffline, &cu.UptimePercentage); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan map customer"})
 			return

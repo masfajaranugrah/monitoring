@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import LatencyBadge from '../components/LatencyBadge.vue'
 import { useMonitorStore } from '../stores/monitor'
 import { useAuthStore } from '../stores/auth'
+import { CUSTOMER_ICONS, customerIconSvg, statusColor } from '../services/customerIcons'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -40,6 +41,7 @@ function emptyForm() {
     latitude: '',
     longitude: '',
     vpn_id: '',
+    icon: 'customer',
     description: '',
     monitoring_enabled: true,
     ping_interval: 10,
@@ -111,6 +113,7 @@ function openEdit(c) {
     latitude: c.latitude,
     longitude: c.longitude,
     vpn_id: c.vpn_id || '',
+    icon: c.icon || 'customer',
     description: c.description || '',
     monitoring_enabled: c.monitoring_enabled,
     ping_interval: c.ping_interval,
@@ -248,8 +251,11 @@ onMounted(() => {
             <td><StatusBadge :status="c.status" /></td>
             <td>
               <div class="crud__customer">
-                <strong>{{ c.customer_code }}</strong>
-                <span>{{ c.customer_name }}</span>
+                <span class="cust-icon" :style="{ '--ic-color': statusColor(c.status) }" v-html="customerIconSvg(c.icon)"></span>
+                <div class="crud__customer-main">
+                  <strong>{{ c.customer_code }}</strong>
+                  <span>{{ c.customer_name }}</span>
+                </div>
               </div>
             </td>
             <td class="mono">{{ c.ip_address }}</td>
@@ -303,6 +309,24 @@ onMounted(() => {
                 <option v-for="v in monitor.vpns" :key="v.id" :value="v.id">{{ v.name }}</option>
               </select>
             </label>
+            <div class="field field--full">
+              <span>Ikon / Logo</span>
+              <div class="icon-picker">
+                <button
+                  v-for="ic in CUSTOMER_ICONS"
+                  :key="ic.value"
+                  type="button"
+                  class="icon-picker__item"
+                  :class="{ 'icon-picker__item--active': form.icon === ic.value }"
+                  :style="'--ic-color:currentColor'"
+                  :title="ic.label"
+                  @click="form.icon = ic.value"
+                >
+                  <span v-html="customerIconSvg(ic.value)"></span>
+                  <span>{{ ic.label }}</span>
+                </button>
+              </div>
+            </div>
             <label class="field"><span>Latitude *</span>
               <input v-model="form.latitude" placeholder="-7.5231" required />
             </label>
