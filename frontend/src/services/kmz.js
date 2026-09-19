@@ -12,11 +12,22 @@ function classifyGeometry(type) {
   return 'line'
 }
 
+function toText(v) {
+  if (v == null) return ''
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  try {
+    return JSON.stringify(v)
+  } catch {
+    return ''
+  }
+}
+
 function extractFeature(feature, index) {
   const p = feature.properties || {}
   const type = feature.geometry && feature.geometry.type
   const name = p.name || p.Name || p.title || p.Title || ''
-  const desc = p.description || p.Description || p.desc || ''
+  const desc = toText(p.description || p.Description || p.desc)
   const fallback = classifyGeometry(type) === 'point' ? 'Titik ' : 'Jalur '
 
   if (type && type === 'GeometryCollection') {

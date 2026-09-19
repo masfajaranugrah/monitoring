@@ -33,7 +33,7 @@ func normalizeFeature(in *struct {
 	FeatureType string          `json:"feature_type" binding:"required"`
 	Icon        string          `json:"icon"`
 	Color       string          `json:"color"`
-	Description string          `json:"description"`
+	Description json.RawMessage `json:"description"`
 	Geometry    json.RawMessage `json:"geometry" binding:"required"`
 	Properties  json.RawMessage `json:"properties"`
 	Source      string          `json:"source"`
@@ -59,6 +59,25 @@ func normalizeFeature(in *struct {
 		in.Properties = json.RawMessage(`{}`)
 	}
 	return "", nil
+}
+
+// descriptionString menerima description yang bisa berupa string, object,
+// array, atau null dari klien mana pun, lalu menormalkannya jadi teks.
+func descriptionString(d json.RawMessage) string {
+	if len(d) == 0 || string(d) == "null" {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(d, &s) == nil {
+		return s
+	}
+	var v interface{}
+	if json.Unmarshal(d, &v) == nil && v != nil {
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+	}
+	return ""
 }
 
 func ListMapFeatures(c *gin.Context) {
@@ -88,10 +107,10 @@ func ListMapFeatures(c *gin.Context) {
 			geometryB   []byte
 			propertiesB []byte
 			source      string
-createdBy   *int64
-		createdAt   time.Time
-		updatedAt   time.Time
-	)
+			createdBy   *int64
+			createdAt   time.Time
+			updatedAt   time.Time
+		)
 		if err := rows.Scan(&id, &name, &featureType, &icon, &color, &desc,
 			&geometryB, &propertiesB, &source, &createdBy, &createdAt, &updatedAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal membaca fitur peta"})
@@ -132,7 +151,7 @@ func CreateMapFeature(c *gin.Context) {
 		FeatureType string          `json:"feature_type" binding:"required"`
 		Icon        string          `json:"icon"`
 		Color       string          `json:"color"`
-		Description string          `json:"description"`
+		Description json.RawMessage `json:"description"`
 		Geometry    json.RawMessage `json:"geometry" binding:"required"`
 		Properties  json.RawMessage `json:"properties"`
 		Source      string          `json:"source"`
@@ -171,7 +190,7 @@ func CreateMapFeature(c *gin.Context) {
 		INSERT INTO map_features (name, feature_type, icon, color, description, geometry, properties, source, created_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at`,
-		in.Name, in.FeatureType, in.Icon, in.Color, in.Description, string(in.Geometry), string(in.Properties), in.Source, userID,
+		in.Name, in.FeatureType, in.Icon, in.Color, descriptionString(in.Description), string(in.Geometry), string(in.Properties), in.Source, userID,
 	).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal menyimpan fitur peta"})
@@ -184,7 +203,7 @@ func CreateMapFeature(c *gin.Context) {
 		"feature_type": in.FeatureType,
 		"icon":         in.Icon,
 		"color":        in.Color,
-		"description":  in.Description,
+		"description":  descriptionString(in.Description),
 		"geometry":     in.Geometry,
 		"properties":   in.Properties,
 		"source":       in.Source,
@@ -202,14 +221,14 @@ func UpdateMapFeature(c *gin.Context) {
 	}
 
 	var in struct {
-		Name        *string         `json:"name"`
-		FeatureType *string         `json:"feature_type"`
-		Icon        *string         `json:"icon"`
-		Color       *string         `json:"color"`
-		Description *string         `json:"description"`
-		Geometry    json.RawMessage `json:"geometry"`
-		Properties  json.RawMessage `json:"properties"`
-		Source      *string         `json:"source"`
+		Name        *string          `json:"name"`
+		FeatureType *string          `json:"feature_type"`
+		Icon        *string          `json:"icon"`
+		Color       *string          `json:"color"`
+		Description *json.RawMessage `json:"description"`
+		Geometry    json.RawMessage  `json:"geometry"`
+		Properties  json.RawMessage  `json:"properties"`
+		Source      *string          `json:"source"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "data fitur tidak valid"})
@@ -273,7 +292,7 @@ func UpdateMapFeature(c *gin.Context) {
 	addSet("icon", icon)
 	addSet("color", color)
 	if in.Description != nil {
-		addSet("description", *in.Description)
+		addSet("description", descriptionString(*in.Description))
 	}
 	if newGeometry != nil {
 		addSet("geometry", string(newGeometry))
@@ -298,7 +317,7 @@ func UpdateMapFeature(c *gin.Context) {
 	row["icon"] = icon
 	row["color"] = color
 	if in.Description != nil {
-		row["description"] = *in.Description
+		row["description"] = descriptionString(*in.Description)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
@@ -334,7 +353,7 @@ func BulkImportMapFeatures(c *gin.Context) {
 			FeatureType string          `json:"feature_type"`
 			Icon        string          `json:"icon"`
 			Color       string          `json:"color"`
-			Description string          `json:"description"`
+			Description json.RawMessage `json:"description"`
 			Geometry    json.RawMessage `json:"geometry"`
 			Properties  json.RawMessage `json:"properties"`
 		} `json:"features" binding:"required"`
@@ -415,7 +434,7 @@ func BulkImportMapFeatures(c *gin.Context) {
 			INSERT INTO map_features (name, feature_type, icon, color, description, geometry, properties, source, created_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING id`,
-			name, ft, icon, color, feat.Description, string(feat.Geometry), string(props), in.Source, userID,
+			name, ft, icon, color, descriptionString(feat.Description), string(feat.Geometry), string(props), in.Source, userID,
 		).Scan(&id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal mengimpor fitur " + name})
@@ -427,7 +446,7 @@ func BulkImportMapFeatures(c *gin.Context) {
 			"feature_type": ft,
 			"icon":         icon,
 			"color":        color,
-			"description":  feat.Description,
+			"description":  descriptionString(feat.Description),
 			"geometry":     feat.Geometry,
 			"source":       in.Source,
 		})
