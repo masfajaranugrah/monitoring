@@ -16,6 +16,8 @@ let alarmTimer = null
 let retryTimer = null
 let playAttempts = 0
 let blockHintShown = false
+let alarmName = ''
+let spokeOnce = false
 
 function ensureAudio() {
   if (audio) return audio
@@ -118,6 +120,12 @@ function playBellOnce() {
 
 function scheduleRetry() {
   playAttempts++
+  // Safari *can* still block HTMLAudio without a gesture, but speechSynthesis
+  // is generally not gated the same way — speak as an audible fallback.
+  if (playAttempts === 1 && !spokeOnce) {
+    spokeOnce = true
+    speakFallback(alarmName)
+  }
   if (playAttempts > MAX_PLAY_ATTEMPTS) {
     showBlockHint()
     return
@@ -126,6 +134,24 @@ function scheduleRetry() {
   retryTimer = setTimeout(() => {
     if (pendingAlarm) queueAlarm()
   }, RETRY_DELAY_MS)
+}
+
+// Desktop Safari & some strict browsers block normal audio without a gesture,
+// but speechSynthesis typically plays anyway — so we speak the alarm instead.
+function speakFallback(name) {
+  try {
+    if (!('speechSynthesis' in window)) return
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(
+      name ? `Alarm! ${name} tidak aktif` : 'Alarm! Router down'
+    )
+    u.lang = 'id-ID'
+    u.volume = 1
+    u.rate = 1
+    window.speechSynthesis.speak(u)
+  } catch (e) {
+    /* noop */
+  }
 }
 
 function queueAlarm() {
@@ -144,9 +170,11 @@ function queueAlarm() {
 // Pure status-driven: an alarm fires whenever the backend reports a customer
 // went OFFLINE. No prior interaction is required for the attempt — browsers
 // that allow autoplay (or have it enabled for this site) will sound it.
-export function playAlarm() {
+export function playAlarm(name) {
   clearTimeout(alarmTimer)
   clearTimeout(retryTimer)
+  alarmName = name || ''
+  spokeOnce = false
   ensureAudio()
   if (!unlocked) {
     pendingAlarm = true

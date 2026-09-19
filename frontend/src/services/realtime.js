@@ -22,7 +22,7 @@ function fireAlarm(data = {}) {
     if (lastRing.has(cid) && now - lastRing.get(cid) < 60000) return
     lastRing.set(cid, now)
   }
-  playAlarm()
+  playAlarm(data.name)
   const { title, body, tag } = offlineAlertPayload(data)
   notify(title, body, { tag })
 }
