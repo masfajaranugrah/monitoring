@@ -41,6 +41,7 @@ const drawMode = ref('')
 const drawVerts = []
 let drawPreview = null
 let drawSupClicked = false
+let suppressClicksUntil = 0
 const drawHintText = computed(() => {
   if (drawMode.value === 'point') return 'Klik peta untuk menempatkan titik informasi'
   if (drawMode.value === 'line') return 'Klik peta untuk menambah titik jalur — klik 2x / klik kanan untuk selesai'
@@ -251,6 +252,9 @@ async function loadFeatures() {
   try {
     const { data } = await api.get('/map/features')
     features.value = data.data || []
+    if (kmzDelEl) {
+      kmzDelEl.style.display = features.value.some((f) => f.source === 'kmz') ? 'flex' : 'none'
+    }
     renderFeatures()
     // Auto-zoom ke area fitur bila peta masih di tampilan awal (zoom kecil),
     // supaya hasil impor langsung terlihat.
@@ -321,13 +325,43 @@ function clearDrawPreview() {
 
 function updateDrawPreview() {
   removeDrawPreviewLayer()
-  if (drawVerts.length < 2) return
-  drawPreview = L.polyline(drawVerts, {
+  if (!drawVerts.length) return
+  const first = drawVerts[0]
+  const last = drawVerts[drawVerts.length - 1]
+  const closing = drawMode.value === 'polygon'
+  const shape = closing ? [...drawVerts, first] : drawVerts
+  const group = L.layerGroup()
+  if (shape.length >= 2) {
+    group.addLayer(
+      L.polyline(shape, {
+        color: '#f43f5e',
+        weight: 3,
+        opacity: 0.95,
+        dashArray: '6 6'
+      })
+    )
+  }
+  drawVerts.forEach((v, i) => {
+    group.addLayer(
+      L.circleMarker([v[0], v[1]], {
+        radius: i === 0 && closing ? 6 : 5,
+        color: '#fff',
+        weight: 2,
+        fillColor: '#f43f5e',
+        fillOpacity: 1
+      })
+    )
+  })
+  const lastMark = L.circleMarker([last[0], last[1]], {
+    radius: 7,
     color: '#f43f5e',
-    weight: 3,
-    opacity: 0.95,
-    dashArray: '6 6'
-  }).addTo(map)
+    weight: 2,
+    fillColor: '#fff',
+    fillOpacity: 1
+  })
+  group.addLayer(lastMark)
+  drawPreview = group
+  if (map) group.addTo(map)
 }
 
 function startDraw(mode) {
@@ -352,17 +386,32 @@ function cancelDraw(opts) {
 
 function finishDraw() {
   if (drawMode.value === 'line' || drawMode.value === 'polygon') {
-    if (drawVerts.length < 2) {
+    const distinct = []
+    for (const v of drawVerts) {
+      const last = distinct[distinct.length - 1]
+      if (!last || last[0] !== v[0] || last[1] !== v[1]) distinct.push(v)
+    }
+    if (distinct.length < 2) {
       cancelDraw()
       return
     }
-    const latlngs = drawVerts.map((v) => ({ lat: v.lat, lng: v.lng }))
+    const latlngs = distinct.map((v) => ({ lat: v[0], lng: v[1] }))
     emit('draw-complete', { type: drawMode.value, latlngs })
   }
   cancelDraw()
 }
 
+function finishDrawGuarded() {
+  if (drawMode.value !== 'line' && drawMode.value !== 'polygon') return
+  // Klik yang menyusul double-click / klik-kanan tidak boleh menambah vertex
+  // lagi atau memicu "tambah pelanggan".
+  suppressClicksUntil = Date.now() + 400
+  drawSupClicked = true
+  finishDraw()
+}
+
 function onMapClick(e) {
+  if (Date.now() < suppressClicksUntil) return
   if (drawMode.value === 'point') {
     drawVerts.length = 0
     emit('draw-complete', { type: 'point', latlng: { lat: e.latlng.lat, lng: e.latlng.lng } })
@@ -379,17 +428,17 @@ function onMapClick(e) {
   emit('map-click', { lat: e.latlng.lat, lng: e.latlng.lng })
 }
 
-function onMapDblClick() {
+function onMapDblClick(e) {
   if (drawMode.value === 'line' || drawMode.value === 'polygon') {
-    drawSupClicked = true
-    finishDraw()
+    if (e && e.originalEvent) e.originalEvent.preventDefault()
+    finishDrawGuarded()
   }
 }
 
 function onMapContextMenu(e) {
   if (drawMode.value === 'line' || drawMode.value === 'polygon') {
     e.originalEvent.preventDefault()
-    finishDraw()
+    finishDrawGuarded()
   }
 }
 
@@ -552,10 +601,22 @@ async function onKmzFile(e) {
 }
 
 async function clearKmz() {
-  if (!importedKmzIds.length) return
+  if (kmzBusy) return
   kmzBusy = true
   try {
-    await Promise.all(importedKmzIds.map((id) => api.delete(`/map/features/${id}`).catch(() => {})))
+    let targets = features.value.filter((f) => f.source === 'kmz').map((f) => f.id)
+    if (!targets.length) {
+      const { data } = await api.get('/map/features')
+      targets = (data.data || []).filter((f) => f.source === 'kmz').map((f) => f.id)
+    }
+    if (!targets.length) {
+      importedKmzIds = []
+      kmzMeta.value = null
+      if (kmzDelEl) kmzDelEl.style.display = 'none'
+      return
+    }
+    if (!window.confirm(`Hapus ${targets.length} fitur lapisan KMZ yang diimpor?`)) return
+    await Promise.all(targets.map((id) => api.delete(`/map/features/${id}`).catch(() => {})))
     importedKmzIds = []
     kmzMeta.value = null
     if (kmzDelEl) kmzDelEl.style.display = 'none'
@@ -697,6 +758,7 @@ defineExpose({
   locate,
   startDraw,
   cancelDraw,
+  finishDrawNow: finishDrawGuarded,
   refreshFeatures: loadFeatures
 })
 </script>

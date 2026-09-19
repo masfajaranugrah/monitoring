@@ -6,6 +6,7 @@ import MapView from '../components/MapView.vue'
 import { useMonitorStore } from '../stores/monitor'
 import { useAreaSearch } from '../composables/useAreaSearch'
 import { customerIconSvg, statusColor } from '../services/customerIcons'
+import { FEATURE_ICONS, FEATURE_COLORS } from '../services/featureIcons'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -18,6 +19,77 @@ const searchOpen = ref(false)
 const loading = ref(true)
 let mapView = null
 const { areaResults, areaLoading, clearArea, areaZoom } = useAreaSearch(search)
+
+const featureEditId = ref(null)
+const featureDraft = ref(null)
+const showFeatureModal = ref(false)
+const featureForm = ref({ name: '', icon: 'dot', color: '#3b82f6', description: '' })
+const featureSaving = ref(false)
+const featureError = ref('')
+
+function onFeatureManage(feature) {
+  featureEditId.value = feature.id
+  featureDraft.value = {
+    isPoint: feature.feature_type === 'point',
+    geometry: feature.geometry
+  }
+  featureForm.value = {
+    name: feature.name || '',
+    icon: feature.icon || 'dot',
+    color: feature.color || FEATURE_COLORS[0],
+    description: feature.description || ''
+  }
+  featureError.value = ''
+  showFeatureModal.value = true
+}
+
+function closeFeatureModal() {
+  showFeatureModal.value = false
+}
+
+async function saveFeature() {
+  if (!featureForm.value.name.trim() || !featureDraft.value) return
+  featureSaving.value = true
+  featureError.value = ''
+  const payload = {
+    name: featureForm.value.name.trim(),
+    feature_type: featureDraft.value.isPoint ? 'point' : featureDraft.value.geometry.type === 'LineString' ? 'line' : 'polygon',
+    icon: featureForm.value.icon,
+    color: featureForm.value.color,
+    description: featureForm.value.description.trim()
+  }
+  try {
+    if (featureEditId.value) {
+      await api.patch(`/map/features/${featureEditId.value}`, payload)
+    } else {
+      await api.post('/map/features', { ...payload, geometry: featureDraft.value.geometry })
+    }
+    closeFeatureModal()
+    featureDraft.value = null
+    mapView?.refreshFeatures()
+  } catch (e) {
+    featureError.value = e.response?.data?.error || 'Gagal menyimpan fitur'
+  } finally {
+    featureSaving.value = false
+  }
+}
+
+async function deleteFeature() {
+  if (!featureEditId.value) return
+  if (!window.confirm('Hapus fitur ini dari peta?')) return
+  featureSaving.value = true
+  featureError.value = ''
+  try {
+    await api.delete(`/map/features/${featureEditId.value}`)
+    closeFeatureModal()
+    featureDraft.value = null
+    mapView?.refreshFeatures()
+  } catch (e) {
+    featureError.value = e.response?.data?.error || 'Gagal menghapus fitur'
+  } finally {
+    featureSaving.value = false
+  }
+}
 
 async function load() {
   try {
@@ -164,7 +236,9 @@ onBeforeUnmount(() => {
           :customers="customers"
           :status-filter="statusFilter"
           :vpn-filter="vpnFilter"
+          :manage-features="true"
           @open-detail="openDetail"
+          @feature-manage="onFeatureManage"
         />
         <div class="legend">
           <div class="legend__item"><span class="legend__dot legend__dot--online" /> ONLINE</div>
@@ -195,6 +269,75 @@ onBeforeUnmount(() => {
           </li>
           <li v-if="!filteredList.length" class="mapmon__empty">Tidak ada pelanggan</li>
         </ul>
+      </div>
+    </div>
+
+    <div v-if="showFeatureModal" class="modal-mask" @click.self="closeFeatureModal">
+      <div class="modal modal--sm">
+        <h3>Kelola Fitur</h3>
+        <p v-if="featureDraft" class="modal__coord">
+          {{ featureDraft.isPoint ? 'Titik informasi' : featureDraft.geometry.type === 'LineString' ? 'Jalur / routing' : 'Area / wilayah' }}
+        </p>
+        <form @submit.prevent="saveFeature">
+          <div class="form-grid form-grid--single">
+            <label class="field"><span>Nama *</span>
+              <input v-model="featureForm.name" placeholder="mis. Jalur Lantai-3, Titik Info JB" required autofocus />
+            </label>
+            <div v-if="featureDraft && featureDraft.isPoint" class="field">
+              <span>Ikon</span>
+              <div class="icon-picker">
+                <button
+                  v-for="ic in FEATURE_ICONS"
+                  :key="ic.value"
+                  type="button"
+                  class="icon-picker__item"
+                  :class="{ 'icon-picker__item--active': featureForm.icon === ic.value }"
+                  :style="`--fm-color:${featureForm.color}`"
+                  :title="ic.label"
+                  @click="featureForm.icon = ic.value"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path v-if="ic.value === 'dot'" d="M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0" fill="var(--fm-color)" stroke="none"/>
+                    <g v-else-if="ic.value === 'customer'"><circle cx="12" cy="8" r="4" fill="var(--fm-color)" stroke="none"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6" fill="var(--fm-color)" stroke="none"/></g>
+                    <g v-else-if="ic.value === 'wifi'"><path d="M4.5 11.5a11 11 0 0 1 15 0"/><path d="M7.5 15.5a6.4 6.4 0 0 1 9 0"/><path d="M10.6 19.4a3 3 0 0 1 2.8 0"/></g>
+                    <path v-else-if="ic.value === 'jb'" d="M6 2.5h12v18.5l-6-4.2-6 4.2z" fill="var(--fm-color)" stroke="none"/>
+                    <g v-else-if="ic.value === 'router'"><rect x="3" y="11" width="18" height="7.5" rx="2" fill="var(--fm-color)" stroke="none"/><path d="M7.5 15.2h.01M11 15.2h.01M16.6 7.4a6 6 0 0 1 0 3.4"/></g>
+                  </svg>
+                  <span>{{ ic.label }}</span>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <span>Warna</span>
+              <div class="color-picker">
+                <button
+                  v-for="c in FEATURE_COLORS"
+                  :key="c"
+                  type="button"
+                  class="color-picker__swatch"
+                  :class="{ 'color-picker__swatch--active': featureForm.color === c }"
+                  :style="`background:${c}`"
+                  :title="c"
+                  @click="featureForm.color = c"
+                ></button>
+              </div>
+            </div>
+            <label class="field"><span>Deskripsi (opsional)</span>
+              <textarea v-model="featureForm.description" rows="2" placeholder="Keterangan singkat"></textarea>
+            </label>
+          </div>
+          <p v-if="featureError" class="login__error">{{ featureError }}</p>
+          <div class="modal__actions">
+            <button v-if="featureEditId" type="button" class="btn btn--danger" :disabled="featureSaving" @click="deleteFeature">
+              {{ featureSaving ? '...' : 'Hapus' }}
+            </button>
+            <span class="spacer"></span>
+            <button type="button" class="btn btn--ghost" @click="closeFeatureModal">Batal</button>
+            <button type="submit" class="btn btn--primary" :disabled="featureSaving">
+              {{ featureSaving ? 'Menyimpan...' : 'Simpan' }}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

@@ -6,6 +6,7 @@ import MapView from '../components/MapView.vue'
 import { useMonitorStore } from '../stores/monitor'
 import { useAreaSearch } from '../composables/useAreaSearch'
 import { CUSTOMER_ICONS, customerIconSvg, statusColor } from '../services/customerIcons'
+import { FEATURE_ICONS as ICON_FEATURE_ICONS, FEATURE_COLORS as ICON_FEATURE_COLORS } from '../services/featureIcons'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -231,17 +232,8 @@ function applyRealtime() {
   if (last_check) target.last_check = last_check
 }
 
-const FEATURE_ICONS = [
-  { value: 'dot', label: 'Titik' },
-  { value: 'customer', label: 'Pelanggan' },
-  { value: 'wifi', label: 'WiFi' },
-  { value: 'jb', label: 'Info (JB)' },
-  { value: 'router', label: 'Router' }
-]
-const FEATURE_COLORS = [
-  '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4',
-  '#f97316', '#84cc16', '#ec4899', '#6366f1', '#14b8a6', '#eab308'
-]
+const FEATURE_ICONS = ICON_FEATURE_ICONS
+const FEATURE_COLORS = ICON_FEATURE_COLORS
 
 const drawTool = ref('')
 const featureDraft = ref(null) // { geometry, isPoint }
@@ -262,6 +254,12 @@ function toggleDraw(mode) {
   mapView.value?.startDraw(mode)
   fullMapView.value?.startDraw(mode)
   drawTool.value = mode
+}
+
+function finishDrawNow() {
+  mapView.value?.finishDrawNow()
+  fullMapView.value?.finishDrawNow()
+  drawTool.value = ''
 }
 
 function openFeatureModal() {
@@ -481,6 +479,14 @@ onUnmounted(() => {
       >
         <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
         Titik Info
+      </button>
+      <button
+        v-if="drawTool && drawTool !== 'point'"
+        type="button"
+        class="btn btn--primary btn--sm map-tools__done"
+        @click="finishDrawNow"
+      >
+        Selesai / Simpan
       </button>
       <button
         v-if="drawTool"
