@@ -346,6 +346,10 @@ func DeleteMapFeature(c *gin.Context) {
 
 // BulkImportMapFeatures dipakai untuk impor hasil Google Earth (KMZ/KML).
 // Tiap fitur mendapat warna berbeda dari palet bila warna tidak ditentukan.
+// Import file besar bisa jauh lebih lama dari query normal, jadi diberi
+// timeout khusus yang lebih panjang (bukan msQueryTimeout 5 detik).
+const bulkImportTimeout = 3 * time.Minute
+
 func BulkImportMapFeatures(c *gin.Context) {
 	var in struct {
 		Features []struct {
@@ -374,7 +378,7 @@ func BulkImportMapFeatures(c *gin.Context) {
 		in.Source = "manual"
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), msQueryTimeout)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), bulkImportTimeout)
 	defer cancel()
 
 	tx, err := database.Pool.Begin(ctx)
@@ -412,6 +416,11 @@ func BulkImportMapFeatures(c *gin.Context) {
 		if name == "" {
 			name = "Fitur " + strconv.Itoa(i+1)
 		}
+		// Nama kolom dibatasi VARCHAR(200); amankan nama panjang dari KML.
+		runes := []rune(name)
+		if len(runes) > 200 {
+			name = string(runes[:200])
+		}
 		ft := strings.ToLower(strings.TrimSpace(feat.FeatureType))
 		if !allowedFeatureTypes[ft] {
 			ft = "line"
@@ -429,6 +438,14 @@ func BulkImportMapFeatures(c *gin.Context) {
 			props = json.RawMessage(`{}`)
 		}
 
+		// SAVEPOINT per fitur: jika satu fitur gagal disimpan (mis. geometri tak
+		// didukung DB), fitur itu dilewati & dilaporkan, bukan membatalkan
+		// seluruh file yang berisi ratusan jalur/area.
+		if _, err := tx.Exec(ctx, "SAVEPOINT import_feature"); err != nil {
+			log.Printf("[map] savepoint error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal memulai impor: " + err.Error()})
+			return
+		}
 		var id int64
 		err := tx.QueryRow(ctx, `
 			INSERT INTO map_features (name, feature_type, icon, color, description, geometry, properties, source, created_by)
@@ -437,9 +454,13 @@ func BulkImportMapFeatures(c *gin.Context) {
 			name, ft, icon, color, descriptionString(feat.Description), string(feat.Geometry), string(props), in.Source, userID,
 		).Scan(&id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal mengimpor fitur " + name})
-			return
+			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT import_feature")
+			_, _ = tx.Exec(ctx, "RELEASE SAVEPOINT import_feature")
+			skipped++
+			log.Printf("[map] fitur dilewati saat impor: %q (%s): %v", name, g.Type, err)
+			continue
 		}
+		_, _ = tx.Exec(ctx, "RELEASE SAVEPOINT import_feature")
 		created = append(created, map[string]interface{}{
 			"id":           id,
 			"name":         name,
@@ -458,7 +479,8 @@ func BulkImportMapFeatures(c *gin.Context) {
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal menyimpan impor"})
+		log.Printf("[map] bulk impor commit gagal (created=%d, skipped=%d): %v", len(created), skipped, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal menyimpan impor: " + err.Error()})
 		return
 	}
 

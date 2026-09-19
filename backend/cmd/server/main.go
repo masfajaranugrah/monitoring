@@ -179,7 +179,7 @@ func main() {
 		Addr:         ":" + cfg.ServerPort,
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		WriteTimeout: 300 * time.Second,
 	}
 
 	go func() {

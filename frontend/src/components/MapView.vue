@@ -511,6 +511,12 @@ function kmzBoundsFor(features) {
   return L.latLngBounds(latlngs)
 }
 
+function kmzErrMsg(fileName, err) {
+  const detail = err?.response?.data?.error
+  if (detail && typeof detail === 'string') return detail
+  return err && err.message ? err.message : 'file tidak valid'
+}
+
 async function onKmzFile(e) {
   const file = e.target && e.target.files && e.target.files[0]
   if (e.target) e.target.value = ''
@@ -535,7 +541,7 @@ async function onKmzFile(e) {
       showGeoError(`${data.skipped} fitur tanpa geometri dilewati (folder kosong/ScreenOverlay)`)
     }
   } catch (err) {
-    showGeoError(`Gagal impor ${file.name}: ${err && err.message ? err.message : 'file tidak valid'}`)
+    showGeoError(`Gagal impor ${file.name}: ${kmzErrMsg(file.name, err)}`)
   } finally {
     kmzBusy = false
   }
