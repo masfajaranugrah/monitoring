@@ -26,7 +26,7 @@ var (
 	cookieDomainRe = regexp.MustCompile(`(?i)(^|;\s*)Domain=[^;]+`)
 	cookiePathRe   = regexp.MustCompile(`(?i)(^|;\s*)Path=[^;]+`)
 	attrUrlRe      = regexp.MustCompile(`(?i)(\b(?:href|src|action|formaction)\s*=\s*["'])([^"']*)`)
-	cssUrlRe       = regexp.MustCompile(`(?i)url\(\s*(['"]?)/([^'"]*)`)
+	cssUrlRe       = regexp.MustCompile(`(?i)url\(\s*(['"]?)/([^'")]*)`)
 	metaRefreshRe  = regexp.MustCompile(`(?i)(\bhttp-equiv\s*=\s*["']refresh["'][^>]*\bcontent\s*=\s*["'][^"']*\burl\s*=\s*)([^;"']+)`)
 	baseTagRe      = regexp.MustCompile(`(?i)(<base\b[^>]*\bhref\s*=\s*["'])([^"']*)(["'])`)
 	pathLitRe      = regexp.MustCompile(`(?i)(["'])(/[^"'\s]*\.(?:ghtml|shtm|shtml|cgi|asp|aspx|php|do|action|html|htm|css|js|png|jpe?g|gif|ico|svg|json|xml|txt|bin|dat))(["'])`)
@@ -314,6 +314,7 @@ func encodeBody(data []byte, ce string) []byte {
 func ModemProxy(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
+		log.Printf("[modem] id tidak valid %q -> url=%s referer=%s", c.Param("id"), c.Request.URL.String(), c.GetHeader("Referer"))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id tidak valid"})
 		return
 	}
