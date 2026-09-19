@@ -63,7 +63,21 @@ func rewriteAbsIP(s, ip, prefix string) string {
 }
 
 func rewriteCSSURLs(s, prefix string) string {
-	return cssUrlRe.ReplaceAllString(s, `url(${1}`+prefix+`$2`)
+	// Jangan preview ulang url yang sudah membawa prefix proksi (misalnya yang
+	// sudah di-rewrite oleh rewritePathLiterals di dalam url(...) pada <style>
+	// atau atribut style). Tanpa penjagaan ini url bisa jadi double-prefix:
+	// /api/modem/proxy/12/api/modem/proxy/12/img/....
+	return cssUrlRe.ReplaceAllStringFunc(s, func(m string) string {
+		idx := cssUrlRe.FindStringSubmatchIndex(m)
+		if idx == nil {
+			return m
+		}
+		path := m[idx[4]:idx[5]]
+		if strings.HasPrefix(strings.ToLower(path), "api/modem/proxy") {
+			return m
+		}
+		return m[:idx[2]] + m[idx[2]:idx[3]] + prefix + path + m[idx[5]:]
+	})
 }
 
 // fixBrokenProxy menormalkan referensi "/api/modem/proxy/<path tanp.id>/..."
@@ -371,6 +385,40 @@ func encodeBody(data []byte, ce string) []byte {
 	return buf.Bytes()
 }
 
+// proxyIDFromReferer menebak id pelanggan dari header Referer ketika sebuah
+// request proksi tiba tanpa id yang sah (misal asset halaman modem yang URL-nya
+// dibangun di runtime oleh JavaScript sehingga jatuh menjadi
+// "/api/modem/proxy/img/..."). Referer halaman induk biasanya berbentuk
+// "/api/modem/proxy/<id>/template.gch?...", id diambil dari segmen pertama.
+func proxyIDFromReferer(c *gin.Context) (int64, bool) {
+	ref := strings.TrimSpace(c.GetHeader("Referer"))
+	if ref == "" {
+		return 0, false
+	}
+	u, err := url.Parse(ref)
+	if err != nil {
+		return 0, false
+	}
+	const marker = "/api/modem/proxy/"
+	idx := strings.Index(strings.ToLower(u.Path), marker)
+	if idx < 0 {
+		return 0, false
+	}
+	seg := u.Path[idx+len(marker):]
+	end := strings.IndexByte(seg, '/')
+	if end >= 0 {
+		seg = seg[:end]
+	}
+	if seg == "" {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(seg, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
 // ModemProxy membuka halaman login modem secara transparan lewat server.
 // Browser tidak perlu bisa menjangkau IP pelanggan (LAN/VPN privat) dan tidak
 // ada masalah mixed-content/X-Frame-Options karena respon disajikan same-origin.
@@ -380,6 +428,22 @@ func ModemProxy(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		log.Printf("[modem] id tidak valid %q -> url=%s referer=%s", c.Param("id"), c.Request.URL.String(), c.GetHeader("Referer"))
+		// Asset/navigasi modem kadang dibangun di runtime tanpa id pelanggan.
+		// Pulihkan id dari halaman induk lewat Referer, lalu arahkan ulang ke
+		// URL proksi yang benar supaya cookie sesi pelanggan ikut terkirim.
+		if rid, ok := proxyIDFromReferer(c); ok {
+			ridStr := strconv.FormatInt(rid, 10)
+			// Urutan asli: /api/modem/proxy/<id-tanpa-angka>/<sisa>.
+			// "id-tanpa-angka" sebenarnya adalah segmen path pertama yang asli.
+			seg := c.Param("id") + c.Param("path")
+			loc := "/api/modem/proxy/" + ridStr + "/" + strings.TrimPrefix(seg, "/")
+			if c.Request.URL.RawQuery != "" {
+				loc += "?" + c.Request.URL.RawQuery
+			}
+			log.Printf("[modem] id tidak valid %q dipulihkan dari referer ke pelanggan %d -> %s", c.Param("id"), rid, loc)
+			c.Redirect(http.StatusTemporaryRedirect, loc)
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id tidak valid"})
 		return
 	}
@@ -510,6 +574,16 @@ func ModemProxy(c *gin.Context) {
 			}
 			if !strings.HasPrefix(sub, "/") {
 				sub = "/" + sub
+			}
+			// Normalisasi hasil rewrite lama/tersimpan yang nyasar jadi
+			// double-prefix: /api/modem/proxy/<id>/api/modem/proxy/<id>/...
+			// Sebaiknya jatuh ke modem sekali saja.
+			for {
+				nested := "/api/modem/proxy/" + idStr + "/"
+				if !strings.HasPrefix(sub, nested) {
+					break
+				}
+				sub = strings.TrimPrefix(sub, nested)
 			}
 			pr.Out.URL.Path = sub
 			pr.Out.URL.Scheme = target.Scheme
