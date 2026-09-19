@@ -29,6 +29,7 @@ var (
 	cssUrlRe       = regexp.MustCompile(`(?i)url\(\s*(['"]?)/([^'"]*)`)
 	metaRefreshRe  = regexp.MustCompile(`(?i)(\bhttp-equiv\s*=\s*["']refresh["'][^>]*\bcontent\s*=\s*["'][^"']*\burl\s*=\s*)([^;"']+)`)
 	baseTagRe      = regexp.MustCompile(`(?i)(<base\b[^>]*\bhref\s*=\s*["'])([^"']*)(["'])`)
+	pathLitRe      = regexp.MustCompile(`(?i)(["'])(/[^"'\s]*\.(?:ghtml|shtm|shtml|cgi|asp|aspx|php|do|action|html|htm|css|js|png|jpe?g|gif|ico|svg|json|xml|txt|bin|dat))(["'])`)
 )
 
 // rewriteRootRelative menambahkan prefiks proksi pada URL absolut-path
@@ -80,10 +81,32 @@ func rewriteMetaRefresh(html, prefix string) string {
 	})
 }
 
+// rewritePathLiterals mengubah literal path root-relatif ("/start.ghtml",
+// "/login.cgi", dst) di carian dan teks skrip menjadi path proksi. Pergantian
+// ini hanya mengganti isi string URL dengan isi string URL, jadi tidak merusak
+// sintaksis skrip page-builder.
+func rewritePathLiterals(s, prefix string) string {
+	return pathLitRe.ReplaceAllStringFunc(s, func(m string) string {
+		idx := pathLitRe.FindStringSubmatchIndex(m)
+		if idx == nil {
+			return m
+		}
+		open := m[idx[2]:idx[3]]
+		path := m[idx[4]:idx[5]]
+		close := m[idx[6]:idx[7]]
+		if strings.HasPrefix(path, "//") ||
+			strings.HasPrefix(strings.ToLower(path), "/api/modem/proxy") {
+			return m
+		}
+		return open + prefix + strings.TrimPrefix(path, "/") + close
+	})
+}
+
 func rewriteHTML(s, ip, prefix string) string {
 	// Teks <script>/<style>/komentar dibiarkan utuh; hanya atribut di dalam tag
 	// yang di-rewrite supaya logika skrip page-builder tidak rusak.
 	s = rewriteHtmlAttrs(s, prefix)
+	s = rewritePathLiterals(s, prefix)
 	s = rewriteAbsIP(s, ip, prefix)
 	s = rewriteCSSURLs(s, prefix)
 	s = rewriteMetaRefresh(s, prefix)
