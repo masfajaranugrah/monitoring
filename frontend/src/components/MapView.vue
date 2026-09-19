@@ -2,6 +2,7 @@
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import L from 'leaflet'
 import 'leaflet.markercluster'
+import { parseKmzFile, saveKmz, loadSavedKmz, clearSavedKmz } from '../services/kmz'
 
 const props = defineProps({
   customers: { type: Array, default: () => [] },
@@ -15,6 +16,7 @@ const props = defineProps({
 const emit = defineEmits(['open-detail', 'map-click'])
 
 const mapEl = ref(null)
+const kmzFileInput = ref(null)
 let map = null
 let markers = null
 let draftMarker = null
@@ -22,6 +24,10 @@ let areaMarker = null
 let selfMarker = null
 let geoWatch = null
 let locating = ref(false)
+let kmzGroup = null
+let kmzBusy = false
+let kmzDelEl = null
+const kmzMeta = ref(null)
 const markerMap = new Map()
 
 const STATUS_COLORS = {
@@ -296,6 +302,122 @@ function locate() {
   )
 }
 
+function kmzPointIcon() {
+  return L.divIcon({
+    className: '',
+    html: '<div class="map-marker map-marker--kmz"><span class="map-marker__inner"></span></div>',
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+    popupAnchor: [0, -10]
+  })
+}
+
+function kmzLayerStyle() {
+  return {
+    color: '#22d3ee',
+    weight: 2,
+    opacity: 0.9,
+    fillColor: '#22d3ee',
+    fillOpacity: 0.15
+  }
+}
+
+function renderKmz(kmz) {
+  if (!map || !kmz || !kmz.geojson) return
+  if (kmzGroup) {
+    map.removeLayer(kmzGroup)
+    kmzGroup = null
+  }
+  const features = kmz.geojson.features || []
+  if (!features.length) {
+    kmzMeta.value = null
+    showGeoError('KMZ tidak mengandung fitur peta')
+    return
+  }
+
+  const gj = L.geoJSON(kmz.geojson, {
+    style: kmzLayerStyle,
+    pointToLayer: (feat, latlng) => L.marker(latlng, { icon: kmzPointIcon() }),
+    onEachFeature: (feat, layer) => {
+      const p = feat.properties || {}
+      const name = p.name || p.Name || feat.id || ''
+      const desc = p.description || p.desc || ''
+      if (name || desc) {
+        layer.bindPopup(
+          `<div class="map-popup"><strong>${escapeHtml(name)}</strong>${
+            desc ? `<div class="map-popup__code">${escapeHtml(desc)}</div>` : ''
+          }</div>`,
+          { maxWidth: 320, className: 'map-popup-shell' }
+        )
+      }
+    }
+  })
+
+  kmzGroup = L.featureGroup().addTo(map)
+  gj.eachLayer((l) => kmzGroup.addLayer(l))
+
+  const b = gj.getBounds()
+  if (b.isValid && b.isValid()) {
+    map.fitBounds(b.pad(0.1), { maxZoom: 17 })
+  }
+
+  kmzMeta.value = { name: kmz.name || 'KMZ', count: features.length }
+  if (kmzDelEl) kmzDelEl.style.display = 'flex'
+}
+
+function clearKmz(alsoStorage) {
+  if (kmzGroup && map) map.removeLayer(kmzGroup)
+  kmzGroup = null
+  kmzMeta.value = null
+  if (kmzDelEl) kmzDelEl.style.display = 'none'
+  if (alsoStorage !== false) clearSavedKmz()
+}
+
+async function onKmzFile(e) {
+  const file = e.target && e.target.files && e.target.files[0]
+  if (e.target) e.target.value = ''
+  if (!file || !map || kmzBusy) return
+  kmzBusy = true
+  try {
+    const kmz = await parseKmzFile(file)
+    renderKmz(kmz)
+    saveKmz(kmz.kmlText)
+  } catch (err) {
+    showGeoError(`Gagal impor ${file.name}: ${err && err.message ? err.message : 'file tidak valid'}`)
+  } finally {
+    kmzBusy = false
+  }
+}
+
+const KmzControl = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const container = L.DomUtil.create('div', 'leaflet-bar kmz-control')
+    const btn = L.DomUtil.create('button', 'kmz-control__btn', container)
+    btn.type = 'button'
+    btn.title = 'Impor mapping KMZ/KML dari Google Earth'
+    btn.setAttribute('aria-label', 'Impor KMZ/KML')
+    btn.innerHTML =
+      '<svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>'
+    btn.addEventListener('click', () => {
+      if (!kmzBusy && kmzFileInput.value) kmzFileInput.value.click()
+    })
+
+    const del = L.DomUtil.create('button', 'kmz-control__btn kmz-control__btn--del', container)
+    del.type = 'button'
+    del.title = 'Hapus lapisan KMZ'
+    del.setAttribute('aria-label', 'Hapus lapisan KMZ')
+    del.innerHTML = '✕'
+    del.style.display = 'none'
+    del.addEventListener('click', () => clearKmz(true))
+    kmzDelEl = del
+
+    L.DomEvent.disableClickPropagation(container)
+    L.DomEvent.disableScrollPropagation(container)
+    return container
+  }
+})
+
 let prevCustomerHandler = null
 
 onMounted(() => {
@@ -314,6 +436,7 @@ onMounted(() => {
     .addTo(map)
 
   map.addControl(new LocateControl())
+  map.addControl(new KmzControl())
 
   BASE_LAYERS['OpenStreetMap'].addTo(map)
 
@@ -322,6 +445,10 @@ onMounted(() => {
   map.on('click', onMapClick)
   rebuildMarkers()
   renderDraft()
+
+  // Restore previously imported Google Earth mapping (persisted locally).
+  const saved = loadSavedKmz()
+  if (saved) renderKmz(saved)
 })
 
 onUnmounted(() => {
@@ -340,6 +467,8 @@ onUnmounted(() => {
     draftMarker = null
     areaMarker = null
     selfMarker = null
+    kmzGroup = null
+    kmzMeta.value = null
     markerMap.clear()
   }
 })
@@ -353,5 +482,12 @@ defineExpose({ focusCustomer, flyTo, getView, locate })
 <template>
   <div class="monitor-map-wrap">
     <div ref="mapEl" class="monitor-map" :class="{ 'monitor-map--clickable': clickToAdd }"></div>
+    <input
+      ref="kmzFileInput"
+      class="kmz-file-input"
+      type="file"
+      accept=".kmz,.kml,.xml,application/vnd.google-earth.kmz"
+      @change="onKmzFile"
+    />
   </div>
 </template>

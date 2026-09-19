@@ -343,6 +343,31 @@ button { font-family: inherit; }
 .map-locate-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .map-locate-btn:hover { background: var(--primary); color: #fff; }
 
+.kmz-file-input { display: none; }
+.kmz-control {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.kmz-control__btn {
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(17, 26, 46, 0.95);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: #22d3ee;
+  cursor: pointer;
+}
+.kmz-control__btn:last-child { border-bottom: 0; }
+.kmz-control__btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.kmz-control__btn:hover { background: var(--primary); color: #fff; }
+.map-marker--kmz {
+  --marker-color: #22d3ee;
+  width: 14px; height: 14px;
+  background: #22d3ee;
+  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.25), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
 .map-popup-shell .leaflet-popup-content-wrapper {
   background: var(--bg-panel);
   color: var(--text);
