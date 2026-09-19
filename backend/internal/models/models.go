@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -175,10 +176,25 @@ type UserCreateInput struct {
 }
 
 type PingEvent struct {
-	Type      string    `json:"type"`
-	Customer  *Customer `json:"customer,omitempty"`
+	Type      string      `json:"type"`
+	Customer  *Customer   `json:"customer,omitempty"`
 	Stats     interface{} `json:"stats,omitempty"`
 	VPNStatus *VPNConnection `json:"vpn_status,omitempty"`
-	Alert     *Alert    `json:"alert,omitempty"`
-	Timestamp time.Time `json:"timestamp"`
+	Alert     *Alert      `json:"alert,omitempty"`
+	Timestamp time.Time   `json:"timestamp"`
+}
+
+type MapFeature struct {
+	ID          int64           `json:"id"`
+	Name        string          `json:"name"`
+	FeatureType string          `json:"feature_type"`
+	Icon        string          `json:"icon"`
+	Color       string          `json:"color"`
+	Description string          `json:"description"`
+	Geometry    json.RawMessage `json:"geometry"`
+	Properties  json.RawMessage `json:"properties"`
+	Source      string          `json:"source"`
+	CreatedBy   *int64          `json:"created_by,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }

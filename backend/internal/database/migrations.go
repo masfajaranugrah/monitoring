@@ -133,6 +133,24 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_read ON alerts(is_read);
+
+CREATE TABLE IF NOT EXISTS map_features (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR(200) NOT NULL,
+  feature_type VARCHAR(20) NOT NULL DEFAULT 'point',
+  icon VARCHAR(30) NOT NULL DEFAULT 'dot',
+  color VARCHAR(20) NOT NULL DEFAULT '#3b82f6',
+  description TEXT DEFAULT '',
+  geometry JSONB NOT NULL,
+  properties JSONB DEFAULT '{}'::jsonb,
+  source VARCHAR(10) NOT NULL DEFAULT 'manual',
+  created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_map_features_type ON map_features(feature_type);
+CREATE INDEX IF NOT EXISTS idx_map_features_created ON map_features(created_at DESC);
 `
 
 func RunMigrations(ctx context.Context) error {

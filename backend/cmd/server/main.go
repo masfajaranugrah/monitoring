@@ -157,6 +157,13 @@ func main() {
 			auth.GET("/alerts", handlers.AlertsList)
 			auth.PATCH("/alerts/:id/read", handlers.AlertMarkRead)
 
+			// Map features (jalur, area, titik informasi & routing peta)
+			auth.GET("/map/features", handlers.ListMapFeatures)
+			auth.POST("/map/features", middleware.AdminOnly(), handlers.CreateMapFeature)
+			auth.POST("/map/features/bulk", middleware.AdminOnly(), handlers.BulkImportMapFeatures)
+			auth.PATCH("/map/features/:id", middleware.AdminOnly(), handlers.UpdateMapFeature)
+			auth.DELETE("/map/features/:id", middleware.AdminOnly(), handlers.DeleteMapFeature)
+
 			// Web terminal (admin only)
 			auth.GET("/terminal/ws", middleware.AdminOnly(), handlers.TerminalWS)
 		}

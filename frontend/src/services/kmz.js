@@ -1,8 +1,47 @@
 import JSZip from 'jszip'
 import * as tg from '@tmcw/togeojson'
 
-const STORAGE_KEY = 'fm_kmz_kml'
-const MAX_STORED = 4 * 1024 * 1024
+const POINT_TYPES = new Set(['Point', 'MultiPoint'])
+const LINE_TYPES = new Set(['LineString', 'MultiLineString'])
+const POLY_TYPES = new Set(['Polygon', 'MultiPolygon'])
+
+function classifyGeometry(type) {
+  if (POINT_TYPES.has(type)) return 'point'
+  if (LINE_TYPES.has(type)) return 'line'
+  if (POLY_TYPES.has(type)) return 'polygon'
+  return 'line'
+}
+
+function extractFeature(feature, index) {
+  const p = feature.properties || {}
+  const type = feature.geometry && feature.geometry.type
+  const name = p.name || p.Name || p.title || p.Title || ''
+  const desc = p.description || p.Description || p.desc || ''
+  const fallback = classifyGeometry(type) === 'point' ? 'Titik ' : 'Jalur '
+
+  if (type && type === 'GeometryCollection') {
+    const cols = []
+    ;(feature.geometry.geometries || []).forEach((g, gi) => {
+      if (!g || !g.type) return
+      cols.push({
+        name: name || `${fallback}${index + 1}-${gi + 1}`,
+        feature_type: classifyGeometry(g.type),
+        geometry: g,
+        description: desc || ''
+      })
+    })
+    return cols
+  }
+
+  return [
+    {
+      name: name || `${fallback}${index + 1}`,
+      feature_type: classifyGeometry(type),
+      geometry: feature.geometry,
+      description: desc || ''
+    }
+  ]
+}
 
 function kmlToGeoJSON(kmlText) {
   const doc = new DOMParser().parseFromString(kmlText, 'application/xml')
@@ -12,7 +51,8 @@ function kmlToGeoJSON(kmlText) {
   return tg.kml(doc)
 }
 
-// Read a .kmz (zip) or .kml file into GeoJSON.
+// Baca file .kmz/.kml menjadi daftar fitur peta (geometri GeoJSON) untuk
+// disimpan ke database via API. Tidak lagi menyimpan apa pun di browser.
 export async function parseKmzFile(file) {
   const buf = await file.arrayBuffer()
   const bytes = new Uint8Array(buf)
@@ -31,33 +71,12 @@ export async function parseKmzFile(file) {
 
   const geojson = kmlToGeoJSON(kmlText)
   const name = file.name.replace(/\.(kmz|kml)$/i, '')
-  return { name, geojson, kmlText }
-}
-
-export function saveKmz(kmlText) {
-  try {
-    if (!kmlText || kmlText.length > MAX_STORED) return
-    localStorage.setItem(STORAGE_KEY, kmlText)
-  } catch (e) {
-    /* storage full or unavailable */
+  const features = []
+  ;(geojson.features || []).forEach((feat, i) => {
+    features.push(...extractFeature(feat, i))
+  })
+  if (!features.length) {
+    throw new Error('KMZ/KML tidak mengandung fitur yang bisa dipetakan')
   }
-}
-
-export function loadSavedKmz() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const geojson = kmlToGeoJSON(raw)
-    return { name: 'Google Earth (tersimpan)', geojson, kmlText: raw }
-  } catch (e) {
-    return null
-  }
-}
-
-export function clearSavedKmz() {
-  try {
-    localStorage.removeItem(STORAGE_KEY)
-  } catch (e) {
-    /* noop */
-  }
+  return { name, features }
 }

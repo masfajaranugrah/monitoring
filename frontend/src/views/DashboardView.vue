@@ -230,6 +230,142 @@ function applyRealtime() {
   if (last_check) target.last_check = last_check
 }
 
+const FEATURE_ICONS = [
+  { value: 'dot', label: 'Titik' },
+  { value: 'customer', label: 'Pelanggan' },
+  { value: 'wifi', label: 'WiFi' },
+  { value: 'jb', label: 'Info (JB)' },
+  { value: 'router', label: 'Router' }
+]
+const FEATURE_COLORS = [
+  '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4',
+  '#f97316', '#84cc16', '#ec4899', '#6366f1', '#14b8a6', '#eab308'
+]
+
+const drawTool = ref('')
+const featureDraft = ref(null) // { geometry, isPoint }
+const featureEditId = ref(null)
+const showFeatureModal = ref(false)
+const featureForm = ref({ name: '', icon: 'dot', color: '#3b82f6', description: '' })
+const featureSaving = ref(false)
+const featureError = ref('')
+
+function toggleDraw(mode) {
+  if (drawTool.value === mode) {
+    mapView.value?.cancelDraw()
+    fullMapView.value?.cancelDraw()
+    drawTool.value = ''
+    return
+  }
+  featureDraft.value = null
+  mapView.value?.startDraw(mode)
+  fullMapView.value?.startDraw(mode)
+  drawTool.value = mode
+}
+
+function openFeatureModal() {
+  featureEditId.value = null
+  featureEditSource.value = null
+  featureForm.value = { name: '', icon: 'dot', color: FEATURE_COLORS[0], description: '' }
+  featureError.value = ''
+  showFeatureModal.value = true
+}
+
+function closeFeatureModal() {
+  showFeatureModal.value = false
+}
+
+function onDrawComplete(payload) {
+  drawTool.value = ''
+  if (payload.type === 'point') {
+    featureDraft.value = {
+      isPoint: true,
+      geometry: { type: 'Point', coordinates: [payload.latlng.lng, payload.latlng.lat] }
+    }
+  } else if (payload.type === 'line') {
+    featureDraft.value = {
+      isPoint: false,
+      geometry: {
+        type: 'LineString',
+        coordinates: payload.latlngs.map((l) => [l.lng, l.lat])
+      }
+    }
+  } else if (payload.type === 'polygon') {
+    const ring = payload.latlngs.map((l) => [l.lng, l.lat])
+    const first = ring[0]
+    const last = ring[ring.length - 1]
+    if (first && last && (first[0] !== last[0] || first[1] !== last[1])) ring.push([first[0], first[1]])
+    featureDraft.value = {
+      isPoint: false,
+      geometry: { type: 'Polygon', coordinates: [ring] }
+    }
+  }
+  openFeatureModal()
+}
+
+function onFeatureManage(feature) {
+  featureEditId.value = feature.id
+  featureDraft.value = {
+    isPoint: feature.feature_type === 'point',
+    geometry: feature.geometry
+  }
+  featureForm.value = {
+    name: feature.name || '',
+    icon: feature.icon || (feature.feature_type === 'point' ? 'dot' : 'dot'),
+    color: feature.color || FEATURE_COLORS[0],
+    description: feature.description || ''
+  }
+  featureError.value = ''
+  showFeatureModal.value = true
+}
+
+async function saveFeature() {
+  if (!featureForm.value.name.trim() || !featureDraft.value) return
+  featureSaving.value = true
+  featureError.value = ''
+  const payload = {
+    name: featureForm.value.name.trim(),
+    feature_type: featureDraft.value.isPoint ? 'point' : featureDraft.value.geometry.type === 'LineString' ? 'line' : 'polygon',
+    icon: featureForm.value.icon,
+    color: featureForm.value.color,
+    description: featureForm.value.description.trim(),
+    geometry: featureDraft.value.geometry
+  }
+  try {
+    if (featureEditId.value) {
+      await api.patch(`/map/features/${featureEditId.value}`, payload)
+    } else {
+      await api.post('/map/features', payload)
+    }
+    closeFeatureModal()
+    featureDraft.value = null
+    mapView.value?.refreshFeatures()
+    fullMapView.value?.refreshFeatures()
+  } catch (e) {
+    featureError.value = e.response?.data?.error || 'Gagal menyimpan fitur'
+  } finally {
+    featureSaving.value = false
+  }
+}
+
+async function deleteFeature() {
+  if (!featureEditId.value) return
+  if (!window.confirm('Hapus fitur ini dari peta?')) return
+  featureSaving.value = true
+  featureError.value = ''
+  try {
+    await api.delete(`/map/features/${featureEditId.value}`)
+    closeFeatureModal()
+    featureDraft.value = null
+    mapView.value?.refreshFeatures()
+    fullMapView.value?.refreshFeatures()
+  } catch (e) {
+    featureError.value = e.response?.data?.error || 'Gagal menghapus fitur'
+  } finally {
+    featureSaving.value = false
+  }
+}
+
 watch(() => monitor.lastEvent, applyRealtime)
 
 onMounted(() => {
@@ -318,6 +454,44 @@ onUnmounted(() => {
       <span class="dashboard__count">{{ customers.length }} titik</span>
     </div>
 
+    <div class="map-tools">
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm"
+        :class="{ 'map-tools__active': drawTool === 'line' }"
+        @click="toggleDraw('line')"
+      >
+        <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 5 8 18M18 5h3v3M3 8l5-5 5 5m-5 8v5"/></svg>
+        Buat Jalur
+      </button>
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm"
+        :class="{ 'map-tools__active': drawTool === 'polygon' }"
+        @click="toggleDraw('polygon')"
+      >
+        <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/></svg>
+        Buat Area
+      </button>
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm"
+        :class="{ 'map-tools__active': drawTool === 'point' }"
+        @click="toggleDraw('point')"
+      >
+        <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+        Titik Info
+      </button>
+      <button
+        v-if="drawTool"
+        type="button"
+        class="btn btn--ghost btn--sm map-tools__cancel"
+        @click="toggleDraw(drawTool)"
+      >
+        Batal gambar
+      </button>
+    </div>
+
     <div class="dashboard__map">
       <MapView
         ref="mapView"
@@ -326,8 +500,11 @@ onUnmounted(() => {
         :vpn-filter="vpnFilter"
         :click-to-add="true"
         :draft-point="draft"
+        :manage-features="true"
         @open-detail="openDetail"
         @map-click="onMapClick"
+        @draw-complete="onDrawComplete"
+        @feature-manage="onFeatureManage"
       />
       <div class="legend">
         <div class="legend__item"><span class="legend__dot legend__dot--online" /> ONLINE</div>
@@ -349,8 +526,11 @@ onUnmounted(() => {
         :initial-view="fullStartView"
         :click-to-add="true"
         :draft-point="draft"
+        :manage-features="true"
         @open-detail="openFromFull"
         @map-click="onMapClick"
+        @draw-complete="onDrawComplete"
+        @feature-manage="onFeatureManage"
       />
 
       <div class="map-full__top">
@@ -479,6 +659,75 @@ onUnmounted(() => {
             <button type="button" class="btn btn--ghost" @click="cancelAdd">Batal</button>
             <button type="submit" class="btn btn--primary" :disabled="saving">
               {{ saving ? 'Menyimpan...' : 'Simpan' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div v-if="showFeatureModal" class="modal-mask" :class="{ 'modal-mask--top': mapExpanded }" @click.self="closeFeatureModal">
+      <div class="modal modal--sm">
+        <h3>{{ featureEditId ? 'Kelola Fitur' : 'Simpan Fitur Peta' }}</h3>
+        <p v-if="featureDraft" class="modal__coord">
+          {{ featureDraft.isPoint ? 'Titik informasi' : featureDraft.geometry.type === 'LineString' ? 'Jalur / routing' : 'Area / wilayah' }}
+        </p>
+        <form @submit.prevent="saveFeature">
+          <div class="form-grid form-grid--single">
+            <label class="field"><span>Nama *</span>
+              <input v-model="featureForm.name" placeholder="mis. Jalur Lantai-3, Titik Info JB" required autofocus />
+            </label>
+            <div v-if="featureDraft && featureDraft.isPoint" class="field">
+              <span>Ikon</span>
+              <div class="icon-picker">
+                <button
+                  v-for="ic in FEATURE_ICONS"
+                  :key="ic.value"
+                  type="button"
+                  class="icon-picker__item"
+                  :class="{ 'icon-picker__item--active': featureForm.icon === ic.value }"
+                  :style="`--fm-color:${featureForm.color}`"
+                  :title="ic.label"
+                  @click="featureForm.icon = ic.value"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path v-if="ic.value === 'dot'" d="M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0" fill="var(--fm-color)" stroke="none"/>
+                    <g v-else-if="ic.value === 'customer'"><circle cx="12" cy="8" r="4" fill="var(--fm-color)" stroke="none"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6" fill="var(--fm-color)" stroke="none"/></g>
+                    <g v-else-if="ic.value === 'wifi'"><path d="M4.5 11.5a11 11 0 0 1 15 0"/><path d="M7.5 15.5a6.4 6.4 0 0 1 9 0"/><path d="M10.6 19.4a3 3 0 0 1 2.8 0"/></g>
+                    <path v-else-if="ic.value === 'jb'" d="M6 2.5h12v18.5l-6-4.2-6 4.2z" fill="var(--fm-color)" stroke="none"/>
+                    <g v-else-if="ic.value === 'router'"><rect x="3" y="11" width="18" height="7.5" rx="2" fill="var(--fm-color)" stroke="none"/><path d="M7.5 15.2h.01M11 15.2h.01M16.6 7.4a6 6 0 0 1 0 3.4"/></g>
+                  </svg>
+                  <span>{{ ic.label }}</span>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <span>Warna</span>
+              <div class="color-picker">
+                <button
+                  v-for="c in FEATURE_COLORS"
+                  :key="c"
+                  type="button"
+                  class="color-picker__swatch"
+                  :class="{ 'color-picker__swatch--active': featureForm.color === c }"
+                  :style="`background:${c}`"
+                  :title="c"
+                  @click="featureForm.color = c"
+                ></button>
+              </div>
+            </div>
+            <label class="field"><span>Deskripsi (opsional)</span>
+              <textarea v-model="featureForm.description" rows="2" placeholder="Keterangan singkat"></textarea>
+            </label>
+          </div>
+          <p v-if="featureError" class="login__error">{{ featureError }}</p>
+          <div class="modal__actions">
+            <button v-if="featureEditId" type="button" class="btn btn--danger" :disabled="featureSaving" @click="deleteFeature">
+              {{ featureSaving ? '...' : 'Hapus' }}
+            </button>
+            <span class="spacer"></span>
+            <button type="button" class="btn btn--ghost" @click="closeFeatureModal">Batal</button>
+            <button type="submit" class="btn btn--primary" :disabled="featureSaving">
+              {{ featureSaving ? 'Menyimpan...' : 'Simpan' }}
             </button>
           </div>
         </form>
