@@ -127,9 +127,9 @@ onMounted(bump)
 }
 
 .modal--wide {
-  width: min(96vw, 1100px);
+  width: min(96vw, 1200px);
   max-width: none;
-  max-height: 92vh;
+  max-height: 96vh;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -231,7 +231,7 @@ onMounted(bump)
   position: relative;
   flex: 1;
   min-height: 0;
-  height: 64vh;
+  height: 82vh;
   background: #fff;
 }
 

@@ -27,6 +27,8 @@ var (
 	cookiePathRe   = regexp.MustCompile(`(?i)(^|;\s*)Path=[^;]+`)
 	attrUrlRe      = regexp.MustCompile(`(?i)(\b(?:href|src|action|formaction)\s*=\s*["'])([^"']*)`)
 	cssUrlRe       = regexp.MustCompile(`(?i)url\(\s*(['"]?)/([^'"]*)`)
+	metaRefreshRe  = regexp.MustCompile(`(?i)(\bhttp-equiv\s*=\s*["']refresh["'][^>]*\bcontent\s*=\s*["'][^"']*\burl\s*=\s*)([^;"']+)`)
+	baseTagRe      = regexp.MustCompile(`(?i)(<base\b[^>]*\bhref\s*=\s*["'])([^"']*)(["'])`)
 )
 
 // rewriteRootRelative menambahkan prefiks proksi pada URL absolut-path
@@ -62,8 +64,6 @@ func rewriteCSSURLs(s, prefix string) string {
 	return cssUrlRe.ReplaceAllString(s, `url(${1}`+prefix+`$2`)
 }
 
-var metaRefreshRe = regexp.MustCompile(`(?i)(\bhttp-equiv\s*=\s*["']refresh["'][^>]*\bcontent\s*=\s*["'][^"']*\burl\s*=\s*)([^;"']+)`)
-
 func rewriteMetaRefresh(html, prefix string) string {
 	return metaRefreshRe.ReplaceAllStringFunc(html, func(m string) string {
 		idx := metaRefreshRe.FindStringSubmatchIndex(m)
@@ -85,17 +85,47 @@ func rewriteHTML(s, ip, prefix string) string {
 	s = rewriteAbsIP(s, ip, prefix)
 	s = rewriteCSSURLs(s, prefix)
 	s = rewriteMetaRefresh(s, prefix)
-	baseTag := `<base href="` + prefix + `">`
-	idx := strings.Index(s, "<head")
+
+	inject := `<script>(function(){try{var p=` + strconv.Quote(prefix) + `;function f(u){if(typeof u==='string'&&u.charAt(0)==='/'&&u.charAt(1)!=='/'&&u.indexOf('/api/modem/proxy')!==0){return p+u.replace(/^\\//,'')}return u}function g(d){try{Object.defineProperty(d,'location',{get:function(){return window.location},set:function(v){var n=f(v);if(n!==v){location.replace(n)}else{location.href=v}},configurable:true})}catch(e){}}g(window);try{if(top&&top!==self){g(top);try{Object.defineProperty(top,'opener',{value:window,configurable:true})}catch(e){}}}catch(e){}}catch(e){}})();</script>`
+
+	insertAt := headInsertPoint(s)
+	if baseTagRe.MatchString(s) {
+		// Sudah ada <base> sendiri di halaman modem: gunakan yang sama, tapi arahkan ke proksi
+		// (aturan HTML: hanya <base> pertama yang dihormati).
+		s = rewriteBase(s, prefix)
+		if insertAt < 0 {
+			return inject + s
+		}
+		return s[:insertAt] + "\n" + inject + s[insertAt:]
+	}
+	// Tidak ada <base>: sematkan <base> proksi + shim navigasi sekaligus.
+	inject = `<base href="` + prefix + `">\n` + inject
+	if insertAt < 0 {
+		return inject + s
+	}
+	return s[:insertAt] + "\n" + inject + s[insertAt:]
+}
+
+// rewriteBase mengubah nilai href elemen <base> pertama menjadi prefix proksi.
+func rewriteBase(s, prefix string) string {
+	idx := baseTagRe.FindStringSubmatchIndex(s)
+	if idx == nil {
+		return s
+	}
+	return s[:idx[2]] + s[idx[2]:idx[3]] + prefix + s[idx[6]:]
+}
+
+// headInsertPoint mengembalikan indeks tepat setelah tag <head ...>, atau -1.
+func headInsertPoint(s string) int {
+	idx := strings.Index(strings.ToLower(s), "<head")
 	if idx < 0 {
-		return baseTag + s
+		return -1
 	}
 	closeIdx := strings.Index(s[idx:], ">")
 	if closeIdx < 0 {
-		return baseTag + s
+		return -1
 	}
-	insertAt := idx + closeIdx + 1
-	return s[:insertAt] + "\n" + baseTag + s[insertAt:]
+	return idx + closeIdx + 1
 }
 
 // readBody membaca body response, dan bila Content-Encoding gzip maka di-gunzip
