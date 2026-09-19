@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -340,7 +341,10 @@ func BulkImportMapFeatures(c *gin.Context) {
 		Source string `json:"source"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "data impor tidak valid"})
+		log.Printf("map feature bulk bind error: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "data impor tidak valid: pastikan body JSON berisi array \"features\" yang tidak kosong",
+		})
 		return
 	}
 	if len(in.Features) == 0 {

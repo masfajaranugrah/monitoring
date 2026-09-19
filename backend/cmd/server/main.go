@@ -23,6 +23,9 @@ import (
 	"monitoring/internal/ws"
 )
 
+// version dipakai sebagai penanda build di /health untuk verifikasi deploy.
+const version = "1.3.0"
+
 func main() {
 	cfg := config.Load()
 
@@ -87,6 +90,7 @@ func main() {
 			"status":  "ok",
 			"time":    time.Now(),
 			"monitor": engine.IsRunning(),
+			"version": version,
 		})
 	})
 
