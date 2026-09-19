@@ -23,13 +23,27 @@ import (
 var (
 	cookieDomainRe = regexp.MustCompile(`(?i)(^|;\s*)Domain=[^;]+`)
 	cookiePathRe   = regexp.MustCompile(`(?i)(^|;\s*)Path=[^;]+`)
-	rootRelRe      = regexp.MustCompile(`(?i)(\b(?:href|src|action|formaction)\s*=\s*["'])/(?!/)([^"']*)`)
+	attrUrlRe      = regexp.MustCompile(`(?i)(\b(?:href|src|action|formaction)\s*=\s*["'])([^"']*)`)
 )
 
 // rewriteRootRelative menambahkan prefiks proksi pada URL absolut-path
 // seperti /login, /js/app.js supaya tetap diproksikan lewat server.
+// URL protokol-relatif (//host), absolut (http(s)://) dan yang sudah
+// ber-prefiks proksi dibiarkan apa adanya.
 func rewriteRootRelative(html, prefix string) string {
-	return rootRelRe.ReplaceAllString(html, `${1}`+prefix+`$2`)
+	return attrUrlRe.ReplaceAllStringFunc(html, func(m string) string {
+		idx := attrUrlRe.FindStringSubmatchIndex(m)
+		if idx == nil {
+			return m
+		}
+		attr := m[idx[2]:idx[3]]
+		val := m[idx[4]:idx[5]]
+		if strings.HasPrefix(val, "/") && !strings.HasPrefix(val, "//") &&
+			!strings.HasPrefix(strings.ToLower(val), "/api/modem/proxy") {
+			return attr + prefix + strings.TrimPrefix(val, "/")
+		}
+		return m
+	})
 }
 
 // ModemProxy membuka halaman login modem secara transparan lewat server.
