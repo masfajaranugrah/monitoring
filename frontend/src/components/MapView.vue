@@ -19,6 +19,9 @@ let map = null
 let markers = null
 let draftMarker = null
 let areaMarker = null
+let selfMarker = null
+let geoWatch = null
+let locating = ref(false)
 const markerMap = new Map()
 
 const STATUS_COLORS = {
@@ -205,6 +208,77 @@ function getView() {
   return { lat: c.lat, lng: c.lng, zoom: map.getZoom() }
 }
 
+function selfIcon() {
+  return L.divIcon({
+    className: '',
+    html: '<div class="map-marker map-marker--self"><span class="map-marker__inner"></span></div>',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -16]
+  })
+}
+
+function placeSelf(lat, lng, accuracy, follow = false) {
+  if (!map) return
+  if (selfMarker) map.removeLayer(selfMarker)
+  selfMarker = L.marker([lat, lng], { icon: selfIcon(), zIndexOffset: 3000 })
+  const acc = accuracy != null ? `akurasi ±${Math.round(accuracy)} m` : ''
+  selfMarker.bindPopup(
+    `<div class="map-popup"><strong>Lokasi Saya</strong>${acc ? `<div class="map-popup__code">${escapeHtml(acc)}</div>` : ''}</div>`,
+    { maxWidth: 260, className: 'map-popup-shell' }
+  )
+  selfMarker.addTo(map)
+  if (!follow) {
+    map.flyTo([lat, lng], 16, { duration: 1.2 })
+  }
+}
+
+function showGeoError(msg) {
+  if (!map) return
+  map.closePopup()
+  const popup = L.popup({ className: 'map-popup-shell', closeButton: false })
+    .setLatLng(map.getCenter())
+    .setContent(`<div class="map-popup"><strong>${escapeHtml(msg)}</strong></div>`)
+    .openOn(map)
+  setTimeout(() => popup.remove(), 3200)
+}
+
+function locate() {
+  if (!map || locating.value) return
+  if (!('geolocation' in navigator)) {
+    showGeoError('Geolokasi tidak didukung oleh browser')
+    return
+  }
+  locating.value = true
+  if (geoWatch != null) {
+    navigator.geolocation.clearWatch(geoWatch)
+    geoWatch = null
+  }
+  const opts = { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      locating.value = false
+      placeSelf(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, false)
+      geoWatch = navigator.geolocation.watchPosition(
+        (p) => placeSelf(p.coords.latitude, p.coords.longitude, p.coords.accuracy, true),
+        () => {},
+        opts
+      )
+    },
+    (err) => {
+      locating.value = false
+      const msg =
+        err.code === 1
+          ? 'Izin lokasi ditolak'
+          : err.code === 2
+          ? 'Lokasi tidak tersedia'
+          : 'Waktu permintaan lokasi habis'
+      showGeoError(msg)
+    },
+    opts
+  )
+}
+
 let prevCustomerHandler = null
 
 onMounted(() => {
@@ -232,6 +306,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (geoWatch != null) {
+    navigator.geolocation.clearWatch(geoWatch)
+    geoWatch = null
+  }
   if (window.__fmCustomer === openCustomerFromWindow) {
     window.__fmCustomer = prevCustomerHandler
   }
@@ -242,6 +320,7 @@ onUnmounted(() => {
     markers = null
     draftMarker = null
     areaMarker = null
+    selfMarker = null
     markerMap.clear()
   }
 })
@@ -249,11 +328,24 @@ onUnmounted(() => {
 watch(filtered, () => rebuildMarkers(), { deep: true })
 watch(() => props.draftPoint, renderDraft)
 
-defineExpose({ focusCustomer, flyTo, getView })
+defineExpose({ focusCustomer, flyTo, getView, locate })
 </script>
 
 <template>
   <div class="monitor-map-wrap">
     <div ref="mapEl" class="monitor-map" :class="{ 'monitor-map--clickable': clickToAdd }"></div>
+    <button
+      class="monitor-map__locate"
+      type="button"
+      :disabled="locating"
+      :aria-label="locating ? 'Mencari lokasi…' : 'Pusatkan ke lokasi saya'"
+      :title="locating ? 'Mencari lokasi…' : 'Pusatkan ke lokasi saya'"
+      @click="locate"
+    >
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.2"></circle>
+        <path d="M12 2v3.2M12 18.8V22M2 12h3.2M18.8 12H22"></path>
+      </svg>
+    </button>
   </div>
 </template>

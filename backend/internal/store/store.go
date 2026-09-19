@@ -182,6 +182,9 @@ func (s *Store) ApplyPingOutcome(ctx context.Context, a ping.PingAttempt) (*ping
 		LatencyMs:   a.LatencyMs,
 		Consecutive: newConsecutive,
 		UptimePct:   uptime,
+		Name:        cu.Name,
+		Code:        cu.Code,
+		IP:          cu.IP,
 	}
 	return outcome, nil
 }

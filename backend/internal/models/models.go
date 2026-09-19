@@ -166,6 +166,14 @@ type LoginInput struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type UserCreateInput struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required,min=8"`
+	FullName string `json:"full_name"`
+	Role     Role   `json:"role"`
+	IsActive bool   `json:"is_active"`
+}
+
 type PingEvent struct {
 	Type      string    `json:"type"`
 	Customer  *Customer `json:"customer,omitempty"`

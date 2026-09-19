@@ -119,6 +119,12 @@ func main() {
 			auth.GET("/auth/me", handlers.Me)
 			auth.POST("/auth/change-password", handlers.ChangePassword)
 
+			// User management (admin only)
+			auth.GET("/auth/users", middleware.AdminOnly(), handlers.ListUsers)
+			auth.POST("/auth/users", middleware.AdminOnly(), handlers.CreateUser)
+			auth.PATCH("/auth/users/:id/active", middleware.AdminOnly(), handlers.SetUserActive)
+			auth.DELETE("/auth/users/:id", middleware.AdminOnly(), handlers.DeleteUser)
+
 			auth.GET("/dashboard/stats", handlers.GetDashboardStats)
 			auth.GET("/map/customers", handlers.MapCustomers)
 			auth.GET("/system/stats", handlers.GetSystemStats)

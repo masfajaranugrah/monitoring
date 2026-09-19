@@ -1,12 +1,11 @@
 import { useMonitorStore } from '../stores/monitor'
 import { useAuthStore } from '../stores/auth'
-import { playOfflineBell } from './sound'
+import { playAlarm } from './sound'
+import { notify, offlineAlertPayload } from './notify'
 
 let socket = null
 let retryTimer = null
 let stopped = true
-
-const customerStatus = new Map()
 
 function handleMessage(event) {
   const store = useMonitorStore()
@@ -15,14 +14,12 @@ function handleMessage(event) {
     const ev = { event: msg.event, data: msg.data }
     store.lastEvent = ev
 
-    if (msg.event === 'customer:update') {
-      const { customer_id, status } = msg.data || {}
-      if (customer_id != null && status) {
-        const prev = customerStatus.get(customer_id)
-        if (prev && prev !== 'OFFLINE' && status === 'OFFLINE') {
-          playOfflineBell()
-        }
-        customerStatus.set(customer_id, status)
+    if (msg.event === 'alert:new') {
+      const data = msg.data || {}
+      if (data.alert_type === 'OFFLINE' || data.status === 'OFFLINE') {
+        playAlarm()
+        const { title, body, tag } = offlineAlertPayload(data)
+        notify(title, body, { tag })
       }
     }
   } catch (err) {

@@ -81,6 +81,9 @@ type PingOutcome struct {
 	Consecutive  int
 	UptimePct    float64
 	CustomerJSON map[string]interface{}
+	Name         string
+	Code         string
+	IP           string
 }
 
 // EventPublisher broadcasts realtime events to SSE/WebSocket clients.
@@ -88,6 +91,7 @@ type EventPublisher interface {
 	BroadcastCustomerUpdate(payload map[string]interface{})
 	BroadcastStats(payload interface{})
 	BroadcastVPNStatus(payload map[string]interface{})
+	PublishAlert(payload interface{})
 }
 
 const (
@@ -281,5 +285,20 @@ func (m *MonitorEngine) process(ctx context.Context, job workItem) {
 			"last_check":  time.Now(),
 		}
 		m.Hub.BroadcastCustomerUpdate(payload)
+
+		// Only emit an alert on the OFFline transition (not repeated failures).
+		if outcome.Status == "OFFLINE" && outcome.OldStatus != "OFFLINE" {
+			m.Hub.PublishAlert(map[string]interface{}{
+				"customer_id": outcome.CustomerID,
+				"code":        outcome.Code,
+				"name":        outcome.Name,
+				"ip":          outcome.IP,
+				"status":      "OFFLINE",
+				"alert_type":  "OFFLINE",
+				"severity":    "CRITICAL",
+				"title":       "ROUTER DOWN",
+				"time":        time.Now(),
+			})
+		}
 	}
 }
