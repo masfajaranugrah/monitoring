@@ -161,5 +161,5 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <ModemAccessModal v-if="showModemModal" :ip="customer.ip_address" @close="showModemModal = false" />
+  <ModemAccessModal v-if="showModemModal" :customer="customer" @close="showModemModal = false" />
 </template>

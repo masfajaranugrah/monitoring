@@ -170,6 +170,9 @@ func main() {
 
 			// Web terminal (admin only)
 			auth.GET("/terminal/ws", middleware.AdminOnly(), handlers.TerminalWS)
+
+			// Modem proxy (akses halaman login modem pelanggan lewat server)
+			auth.Any("/modem/proxy/:id/*path", handlers.ModemProxy)
 		}
 	}
 

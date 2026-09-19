@@ -377,6 +377,6 @@ onMounted(() => {
       </div>
     </div>
 
-    <ModemAccessModal v-if="modemCustomer" :ip="modemCustomer.ip_address" @close="modemCustomer = null" />
+    <ModemAccessModal v-if="modemCustomer" :customer="modemCustomer" @close="modemCustomer = null" />
   </div>
 </template>

@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 
 const props = defineProps({
-  ip: { type: String, required: true }
+  customer: { type: Object, required: true }
 })
 const emit = defineEmits(['close'])
 
@@ -11,13 +11,22 @@ const port = ref(80)
 const frameKey = ref(0)
 const loaded = ref(false)
 
-const url = computed(() => {
-  const base = (props.ip || '').trim()
+const ip = computed(() => (props.customer?.ip_address || '').trim())
+const id = computed(() => props.customer?.id)
+
+const targetUrl = computed(() => {
+  const base = ip.value
   if (!base) return ''
   const s = scheme.value
   const p = Number(port.value) || 80
   const defaultPort = s === 'https' ? 443 : 80
   return p === defaultPort ? `${s}://${base}/` : `${s}://${base}:${p}/`
+})
+
+const proxyUrl = computed(() => {
+  if (!id.value) return ''
+  const p = Number(port.value) || 80
+  return `/api/modem/proxy/${id.value}/?scheme=${scheme.value}&port=${p}`
 })
 
 function bump() {
@@ -32,7 +41,7 @@ function useScheme(s) {
 }
 
 function openNewTab() {
-  if (url.value) window.open(url.value, '_blank')
+  if (proxyUrl.value) window.open(proxyUrl.value, '_blank')
 }
 </script>
 
@@ -41,7 +50,7 @@ function openNewTab() {
     <div class="modal modal--wide">
       <div class="modem-head">
         <h3 class="modem-head__title">Akses Modem</h3>
-        <span class="mono modem-head__ip">{{ ip }}</span>
+        <span class="mono modem-head__ip">{{ targetUrl }}</span>
         <button type="button" class="modem-head__close" aria-label="Tutup" @click="emit('close')">✕</button>
       </div>
 
@@ -66,7 +75,7 @@ function openNewTab() {
           <input v-model.number="port" type="number" min="1" max="65535" @change="bump" />
         </label>
 
-        <span class="modem-bar__url mono">{{ url }}</span>
+        <span class="modem-bar__url mono">{{ proxyUrl }}</span>
 
         <div class="modem-bar__actions">
           <button type="button" class="btn btn--ghost btn--sm" @click="bump">Muat ulang</button>
@@ -76,12 +85,13 @@ function openNewTab() {
 
       <div class="modal__body">
         <div v-if="!loaded" class="modem-loading">Memuat halaman login modem...</div>
-        <iframe :key="frameKey" :src="url" class="modem-frame" @load="loaded = true"></iframe>
+        <iframe :key="frameKey" :src="proxyUrl" class="modem-frame" @load="loaded = true"></iframe>
       </div>
 
       <p class="modem-note">
-        Jika halaman kosong, modem mungkin menolak di-embed (X-Frame-Options) — gunakan
-        <strong>Buka di tab baru</strong>.
+        Halaman disajikan lewat server (same-origin), jadi tidak ada masalah mixed-content maupun
+        X-Frame-Options. Jika tampak kosong, modem tidak dapat dijangkau server — coba ganti scheme/port,
+        atau gunakan <strong>Buka di tab baru</strong>.
       </p>
     </div>
   </div>
