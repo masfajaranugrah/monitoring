@@ -37,6 +37,26 @@ func GenerateToken(userID int64, username, role string, expiryHours int) (string
 	return token.SignedString(jwtSecret)
 }
 
+// ValidateToken memvalidasi JWT tanpa menyimpan claims ke context.
+// Dipakai oleh handler yang tidak lewat AuthMiddleware (mis. modem proxy)
+// karena page yang diproksi memuat asset via URL relatif tanpa header auth.
+func ValidateToken(tokenStr string) (int64, bool) {
+	if tokenStr == "" {
+		return 0, false
+	}
+	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+	if err != nil || !token.Valid {
+		return 0, false
+	}
+	cl, ok := token.Claims.(*Claims)
+	if !ok {
+		return 0, false
+	}
+	return cl.UserID, true
+}
+
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// WebSocket clients can't set an Authorization header, so also accept

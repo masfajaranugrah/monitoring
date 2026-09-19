@@ -406,20 +406,22 @@ button { font-family: inherit; }
 .mapmon { display: flex; flex-direction: column; gap: 12px; height: 100%; }
 .mapmon__toolbar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 10px 14px; }
 .mapmon__body { display: flex; gap: 12px; flex: 1; min-height: 0; }
-.mapmon__list { width: 330px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; }
-.mapmon__list-title { margin: 0 0 10px; font-size: 13px; padding: 12px 14px 0; }
+.mapmon__list { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; }
+.mapmon--wide .mapmon__list { display: none; }
+.mapmon--wide .mapmon__map { min-width: 0; }
+.mapmon__list-title { margin: 0 0 8px; font-size: 12.5px; padding: 10px 12px 0; }
 .mapmon__list-title span { color: var(--primary); }
-.mapmon__list-items { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; }
+.mapmon__list-items { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
 .mapmon__item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 10px; border-radius: 8px; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 8px; cursor: pointer;
   border-bottom: 1px solid var(--border);
 }
 .mapmon__item:hover { background: var(--bg-hover); }
 .mapmon__item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.mapmon__item-main strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mapmon__item-main span { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mapmon__item-ms { font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); }
+.mapmon__item-main strong { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mapmon__item-main span { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mapmon__item-ms { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; color: var(--text-dim); }
 .mapmon__empty, .mapmon__list .mapmon__empty { padding: 20px; text-align: center; color: var(--text-faint); }
 
 .search { display: flex; align-items: center; gap: 8px; background: var(--bg-panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; flex: 1; min-width: 180px; }
@@ -644,6 +646,51 @@ button { font-family: inherit; }
 
 /* ---------- Fitur peta (jalur / area / titik info) ---------- */
 .spacer { flex: 1; }
+
+/* Drawing tools — floating overlay beside the map zoom (+/−) */
+.map-draw {
+  position: absolute;
+  top: 10px;
+  left: 52px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.map-draw--full {
+  top: 64px;
+  left: 56px;
+}
+.map-draw__main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(22, 33, 58, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+.map-draw__main:hover { background: var(--bg-hover); }
+.map-draw__main--open {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
+}
+.map-draw__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(22, 33, 58, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 5px;
+  backdrop-filter: blur(4px);
+}
+.map-draw__tools .btn { justify-content: flex-start; }
 
 .map-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; }
 .map-tools__active { background: var(--primary); color: #fff; border-color: var(--primary); }

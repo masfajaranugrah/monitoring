@@ -17,8 +17,12 @@ const vpnFilter = ref('ALL')
 const search = ref('')
 const searchOpen = ref(false)
 const loading = ref(true)
-let mapView = null
+const mapView = ref(null)
 const { areaResults, areaLoading, clearArea, areaZoom } = useAreaSearch(search)
+
+const drawOpen = ref(false)
+const drawTool = ref('')
+const mapWide = ref(false)
 
 const featureEditId = ref(null)
 const featureDraft = ref(null)
@@ -66,7 +70,7 @@ async function saveFeature() {
     }
     closeFeatureModal()
     featureDraft.value = null
-    mapView?.refreshFeatures()
+    mapView.value?.refreshFeatures()
   } catch (e) {
     featureError.value = e.response?.data?.error || 'Gagal menyimpan fitur'
   } finally {
@@ -83,12 +87,76 @@ async function deleteFeature() {
     await api.delete(`/map/features/${featureEditId.value}`)
     closeFeatureModal()
     featureDraft.value = null
-    mapView?.refreshFeatures()
+    mapView.value?.refreshFeatures()
   } catch (e) {
     featureError.value = e.response?.data?.error || 'Gagal menghapus fitur'
   } finally {
     featureSaving.value = false
   }
+}
+
+function toggleDrawTools() {
+  if (drawOpen.value) closeDrawTools()
+  else {
+    drawOpen.value = true
+    mapWide.value = true
+  }
+}
+
+function closeDrawTools() {
+  drawTool.value = ''
+  if (mapView.value) mapView.value.cancelDraw()
+  drawOpen.value = false
+  mapWide.value = false
+}
+
+function toggleDraw(mode) {
+  if (drawTool.value === mode) {
+    closeDrawTools()
+    return
+  }
+  if (drawTool.value) mapView.value?.cancelDraw()
+  drawOpen.value = true
+  drawTool.value = mode
+  mapWide.value = true
+  mapView.value?.startDraw(mode)
+}
+
+function finishDrawNow() {
+  mapView.value?.finishDrawNow()
+  drawTool.value = ''
+  drawOpen.value = false
+  mapWide.value = false
+}
+
+function onDrawComplete(payload) {
+  drawTool.value = ''
+  drawOpen.value = false
+  mapWide.value = false
+  if (payload.type === 'point') {
+    featureDraft.value = {
+      isPoint: true,
+      geometry: { type: 'Point', coordinates: [payload.latlng.lng, payload.latlng.lat] }
+    }
+  } else if (payload.type === 'line') {
+    featureDraft.value = {
+      isPoint: false,
+      geometry: { type: 'LineString', coordinates: payload.latlngs.map((l) => [l.lng, l.lat]) }
+    }
+  } else if (payload.type === 'polygon') {
+    const ring = payload.latlngs.map((l) => [l.lng, l.lat])
+    const first = ring[0]
+    const last = ring[ring.length - 1]
+    if (first && last && (first[0] !== last[0] || first[1] !== last[1])) ring.push([first[0], first[1]])
+    featureDraft.value = {
+      isPoint: false,
+      geometry: { type: 'Polygon', coordinates: [ring] }
+    }
+  }
+  featureEditId.value = null
+  featureForm.value = { name: '', icon: 'dot', color: FEATURE_COLORS[0], description: '' }
+  featureError.value = ''
+  showFeatureModal.value = true
 }
 
 async function load() {
@@ -134,11 +202,11 @@ function openDetail(customer) {
 }
 
 function focusOnList(customer) {
-  mapView?.focusCustomer(customer)
+  mapView.value?.focusCustomer(customer)
 }
 
 function focusFromArea(a) {
-  mapView?.flyTo(Number(a.lat), Number(a.lon), areaZoom(a), a.display_name)
+  mapView.value?.flyTo(Number(a.lat), Number(a.lon), areaZoom(a), a.display_name)
   clearArea()
   search.value = ''
 }
@@ -161,7 +229,7 @@ watch(filteredList, (list) => {
   if (list.length !== 1 || !search.value.trim()) return
   const c = list[0]
   if (c.latitude != null && c.longitude != null) {
-    mapView?.focusCustomer(c)
+    mapView.value?.focusCustomer(c)
   }
 })
 
@@ -171,12 +239,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  mapView = null
+  mapView.value = null
 })
 </script>
 
 <template>
-  <div class="mapmon">
+  <div class="mapmon" :class="{ 'mapmon--wide': mapWide }">
     <div class="mapmon__toolbar panel">
       <div class="search-wrap">
         <div class="search">
@@ -239,7 +307,67 @@ onBeforeUnmount(() => {
           :manage-features="true"
           @open-detail="openDetail"
           @feature-manage="onFeatureManage"
+          @draw-complete="onDrawComplete"
         />
+
+        <div class="map-draw">
+          <button
+            type="button"
+            class="map-draw__main"
+            :class="{ 'map-draw__main--open': drawOpen }"
+            @click="toggleDrawTools"
+          >
+            <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2 15.5 7.5M21 2l-5 5-4-2-2.5 2.5 4 4L8 18l-4 1 2 2 2-1 2.5-2.5 4 4L17 18l-2-4 5-5z"/><path d="M13 11l4-4"/></svg>
+            Gambar
+          </button>
+
+          <div v-if="drawOpen" class="map-draw__tools">
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              :class="{ 'map-tools__active': drawTool === 'line' }"
+              @click="toggleDraw('line')"
+            >
+              <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 5 8 18M18 5h3v3M3 8l5-5 5 5m-5 8v5"/></svg>
+              Buat Jalur
+            </button>
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              :class="{ 'map-tools__active': drawTool === 'polygon' }"
+              @click="toggleDraw('polygon')"
+            >
+              <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/></svg>
+              Buat Area
+            </button>
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              :class="{ 'map-tools__active': drawTool === 'point' }"
+              @click="toggleDraw('point')"
+            >
+              <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+              Titik Info
+            </button>
+            <button
+              v-if="drawTool && drawTool !== 'point'"
+              type="button"
+              class="btn btn--primary btn--sm"
+              @click="finishDrawNow"
+            >
+              Selesai / Simpan
+            </button>
+            <button
+              v-if="drawTool"
+              type="button"
+              class="btn btn--ghost btn--sm map-tools__cancel"
+              @click="toggleDraw(drawTool)"
+            >
+              Batal gambar
+            </button>
+          </div>
+        </div>
+
         <div class="legend">
           <div class="legend__item"><span class="legend__dot legend__dot--online" /> ONLINE</div>
           <div class="legend__item"><span class="legend__dot legend__dot--offline" /> OFFLINE</div>

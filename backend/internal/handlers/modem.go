@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"monitoring/internal/database"
+	"monitoring/internal/middleware"
 )
 
 var (
@@ -98,6 +99,28 @@ func ModemProxy(c *gin.Context) {
 
 	idStr := strconv.FormatInt(id, 10)
 	proxyPath := "/api/modem/proxy/" + idStr + "/"
+
+	// Autentikasi: token JWT diterima via ?token= pada kunjungan pertama, lalu
+	// disimpan sebagai cookie sesi agar asset halaman modem (URL relatif tanpa
+	// header Authorization) juga terautentikasi.
+	cookieName := "mdm_proxy_" + idStr
+	token := c.Query("token")
+	if token == "" {
+		if ck, cerr := c.Cookie(cookieName); cerr == nil && ck != "" {
+			token = ck
+		}
+	}
+	if _, ok := middleware.ValidateToken(token); !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     cookieName,
+		Value:    token,
+		Path:     proxyPath,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {

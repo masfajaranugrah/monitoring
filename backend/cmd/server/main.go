@@ -170,10 +170,12 @@ func main() {
 
 			// Web terminal (admin only)
 			auth.GET("/terminal/ws", middleware.AdminOnly(), handlers.TerminalWS)
-
-			// Modem proxy (akses halaman login modem pelanggan lewat server)
-			auth.Any("/modem/proxy/:id/*path", handlers.ModemProxy)
 		}
+
+		// Modem proxy — autentikasi ditangani sendiri di handler (token via query
+		// pada kunjungan pertama, lalu cookie sesi untuk subresource) karena halaman
+		// modem memuat asset (css/js/img) lewat URL relatif tanpa header Authorization.
+		api.Any("/modem/proxy/:id/*path", handlers.ModemProxy)
 	}
 
 	// Ensure the monitoring engine is exercised even if the VPN manager is idle.

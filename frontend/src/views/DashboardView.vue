@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import MapView from '../components/MapView.vue'
@@ -116,6 +116,10 @@ function closeFullscreen() {
   const v = fullMapView.value?.getView()
   if (v && mapView.value) mapView.value.flyTo(v.lat, v.lng, v.zoom)
   mapExpanded.value = false
+  mapView.value?.cancelDraw()
+  fullMapView.value?.cancelDraw()
+  drawTool.value = ''
+  drawOpen.value = false
   fullSearch.value = ''
   fullSearchOpen.value = false
   fullAreaSearch.value = ''
@@ -236,6 +240,7 @@ const FEATURE_ICONS = ICON_FEATURE_ICONS
 const FEATURE_COLORS = ICON_FEATURE_COLORS
 
 const drawTool = ref('')
+const drawOpen = ref(false)
 const featureDraft = ref(null) // { geometry, isPoint }
 const featureEditId = ref(null)
 const showFeatureModal = ref(false)
@@ -243,17 +248,21 @@ const featureForm = ref({ name: '', icon: 'dot', color: '#3b82f6', description: 
 const featureSaving = ref(false)
 const featureError = ref('')
 
-function toggleDraw(mode) {
+async function toggleDraw(mode) {
   if (drawTool.value === mode) {
     mapView.value?.cancelDraw()
     fullMapView.value?.cancelDraw()
     drawTool.value = ''
+    drawOpen.value = false
     return
   }
   featureDraft.value = null
+  if (!mapExpanded.value) openFullscreen()
+  await nextTick()
   mapView.value?.startDraw(mode)
   fullMapView.value?.startDraw(mode)
   drawTool.value = mode
+  drawOpen.value = true
 }
 
 function finishDrawNow() {
@@ -452,52 +461,6 @@ onUnmounted(() => {
       <span class="dashboard__count">{{ customers.length }} titik</span>
     </div>
 
-    <div class="map-tools">
-      <button
-        type="button"
-        class="btn btn--ghost btn--sm"
-        :class="{ 'map-tools__active': drawTool === 'line' }"
-        @click="toggleDraw('line')"
-      >
-        <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 5 8 18M18 5h3v3M3 8l5-5 5 5m-5 8v5"/></svg>
-        Buat Jalur
-      </button>
-      <button
-        type="button"
-        class="btn btn--ghost btn--sm"
-        :class="{ 'map-tools__active': drawTool === 'polygon' }"
-        @click="toggleDraw('polygon')"
-      >
-        <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/></svg>
-        Buat Area
-      </button>
-      <button
-        type="button"
-        class="btn btn--ghost btn--sm"
-        :class="{ 'map-tools__active': drawTool === 'point' }"
-        @click="toggleDraw('point')"
-      >
-        <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-        Titik Info
-      </button>
-      <button
-        v-if="drawTool && drawTool !== 'point'"
-        type="button"
-        class="btn btn--primary btn--sm map-tools__done"
-        @click="finishDrawNow"
-      >
-        Selesai / Simpan
-      </button>
-      <button
-        v-if="drawTool"
-        type="button"
-        class="btn btn--ghost btn--sm map-tools__cancel"
-        @click="toggleDraw(drawTool)"
-      >
-        Batal gambar
-      </button>
-    </div>
-
     <div class="dashboard__map">
       <MapView
         ref="mapView"
@@ -512,6 +475,14 @@ onUnmounted(() => {
         @draw-complete="onDrawComplete"
         @feature-manage="onFeatureManage"
       />
+
+      <div class="map-draw">
+        <button type="button" class="map-draw__main" @click="openFullscreen">
+          <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2 15.5 7.5M21 2l-5 5-4-2-2.5 2.5 4 4L8 18l-4 1 2 2 2-1 2.5-2.5 4 4L17 18l-2-4 5-5z"/><path d="M13 11l4-4"/></svg>
+          Gambar Peta
+        </button>
+      </div>
+
       <div class="legend">
         <div class="legend__item"><span class="legend__dot legend__dot--online" /> ONLINE</div>
         <div class="legend__item"><span class="legend__dot legend__dot--offline" /> OFFLINE</div>
@@ -538,6 +509,54 @@ onUnmounted(() => {
         @draw-complete="onDrawComplete"
         @feature-manage="onFeatureManage"
       />
+
+      <div class="map-draw map-draw--full">
+        <div class="map-draw__tools">
+          <button
+            type="button"
+            class="btn btn--ghost btn--sm"
+            :class="{ 'map-tools__active': drawTool === 'line' }"
+            @click="toggleDraw('line')"
+          >
+            <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 5 8 18M18 5h3v3M3 8l5-5 5 5m-5 8v5"/></svg>
+            Buat Jalur
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost btn--sm"
+            :class="{ 'map-tools__active': drawTool === 'polygon' }"
+            @click="toggleDraw('polygon')"
+          >
+            <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/></svg>
+            Buat Area
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost btn--sm"
+            :class="{ 'map-tools__active': drawTool === 'point' }"
+            @click="toggleDraw('point')"
+          >
+            <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+            Titik Info
+          </button>
+          <button
+            v-if="drawTool && drawTool !== 'point'"
+            type="button"
+            class="btn btn--primary btn--sm"
+            @click="finishDrawNow"
+          >
+            Selesai / Simpan
+          </button>
+          <button
+            v-if="drawTool"
+            type="button"
+            class="btn btn--ghost btn--sm map-tools__cancel"
+            @click="toggleDraw(drawTool)"
+          >
+            Batal gambar
+          </button>
+        </div>
+      </div>
 
       <div class="map-full__top">
         <button class="map-full__back" @click="closeFullscreen">
@@ -913,7 +932,7 @@ onUnmounted(() => {
 
 .map-full__panel {
   pointer-events: auto;
-  width: 320px;
+  width: 288px;
   max-width: calc(100vw - 24px);
   max-height: calc(100vh - 80px);
   background: rgba(22, 33, 58, 0.92);
@@ -942,7 +961,7 @@ onUnmounted(() => {
 
 .map-full__search-wrap {
   position: relative;
-  padding: 10px 10px 6px;
+  padding: 8px 10px 4px;
 }
 
 .map-full__list-head {
@@ -966,7 +985,7 @@ onUnmounted(() => {
 .map-full__items {
   list-style: none;
   margin: 0;
-  padding: 4px 6px 10px;
+  padding: 4px 4px 8px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
@@ -975,8 +994,8 @@ onUnmounted(() => {
 .map-full__item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px;
+  gap: 8px;
+  padding: 5px 8px;
   border-radius: 8px;
   cursor: pointer;
 }
@@ -993,14 +1012,14 @@ onUnmounted(() => {
 }
 
 .map-full__item-main strong {
-  font-size: 12.5px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .map-full__item-main span {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -1009,7 +1028,7 @@ onUnmounted(() => {
 
 .map-full__ms {
   font-family: "SF Mono", Menlo, monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-dim);
 }
 
