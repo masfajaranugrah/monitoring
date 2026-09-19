@@ -82,9 +82,20 @@ function queueAlarm() {
 
 export function playAlarm() {
   clearTimeout(alarmTimer)
+  // Always (re)register unlock listeners so the first gesture anywhere on the
+  // page unblocks audio even if an alarm already fired.
+  ensureAudio()
   if (!unlocked) {
     pendingAlarm = true
+    // Best-effort immediate attempt: accepted if the site is already allowed
+    // to autoplay; otherwise rejected silently and the pending alarm rings on
+    // the next user gesture.
+    queueAlarm()
     return
   }
   queueAlarm()
 }
+
+// Register unlock listeners as early as possible (doc is available in browser)
+// so the very first click/keypress anywhere unlocks audio before any alarm.
+ensureAudio()
