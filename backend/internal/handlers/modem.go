@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ var (
 	cookieDomainRe = regexp.MustCompile(`(?i)(^|;\s*)Domain=[^;]+`)
 	cookiePathRe   = regexp.MustCompile(`(?i)(^|;\s*)Path=[^;]+`)
 	attrUrlRe      = regexp.MustCompile(`(?i)(\b(?:href|src|action|formaction)\s*=\s*["'])([^"']*)`)
+	cssUrlRe       = regexp.MustCompile(`(?i)url\(\s*(['"]?)/([^'"]*)`)
 )
 
 // rewriteRootRelative menambahkan prefiks proksi pada URL absolut-path
@@ -45,6 +47,90 @@ func rewriteRootRelative(html, prefix string) string {
 		}
 		return m
 	})
+}
+
+// rewriteAbsIP mengarahkan URL absolut ke IP modem (http(s)://<ip>[:port]/...)
+// kembali lewat proksi. Referensi semacam ini sering dipakai firmware modem di
+// CSS/JS/HTML untuk memuat asset atau menavigasi pasca-login; browser tidak
+// bisa menjangkaunya langsung karena IP bersifat privat.
+func rewriteAbsIP(s, ip, prefix string) string {
+	re := regexp.MustCompile(`(?i)https?://` + regexp.QuoteMeta(ip) + `(?::[0-9]+)?/`)
+	return re.ReplaceAllString(s, prefix)
+}
+
+func rewriteCSSURLs(s, prefix string) string {
+	return cssUrlRe.ReplaceAllString(s, `url(${1}`+prefix+`$2`)
+}
+
+var metaRefreshRe = regexp.MustCompile(`(?i)(\bhttp-equiv\s*=\s*["']refresh["'][^>]*\bcontent\s*=\s*["'][^"']*\burl\s*=\s*)([^;"']+)`)
+
+func rewriteMetaRefresh(html, prefix string) string {
+	return metaRefreshRe.ReplaceAllStringFunc(html, func(m string) string {
+		idx := metaRefreshRe.FindStringSubmatchIndex(m)
+		if idx == nil {
+			return m
+		}
+		head := m[idx[2]:idx[3]]
+		urlval := m[idx[4]:idx[5]]
+		if strings.HasPrefix(urlval, "/") && !strings.HasPrefix(urlval, "//") &&
+			!strings.HasPrefix(strings.ToLower(urlval), "/api/modem/proxy") {
+			return head + prefix + strings.TrimPrefix(urlval, "/")
+		}
+		return m
+	})
+}
+
+func rewriteHTML(s, ip, prefix string) string {
+	s = rewriteRootRelative(s, prefix)
+	s = rewriteAbsIP(s, ip, prefix)
+	s = rewriteCSSURLs(s, prefix)
+	s = rewriteMetaRefresh(s, prefix)
+	baseTag := `<base href="` + prefix + `">`
+	idx := strings.Index(s, "<head")
+	if idx < 0 {
+		return baseTag + s
+	}
+	closeIdx := strings.Index(s[idx:], ">")
+	if closeIdx < 0 {
+		return baseTag + s
+	}
+	insertAt := idx + closeIdx + 1
+	return s[:insertAt] + "\n" + baseTag + s[insertAt:]
+}
+
+// readBody membaca body response, dan bila Content-Encoding gzip maka di-gunzip
+// terlebih dahulu agar peng-rewrite bisa memprosesnya.
+func readBody(resp *http.Response) ([]byte, string) {
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	ce := resp.Header.Get("Content-Encoding")
+	if err != nil {
+		return body, ce
+	}
+	if !strings.EqualFold(ce, "gzip") {
+		return body, ce
+	}
+	gr, gerr := gzip.NewReader(bytes.NewReader(body))
+	if gerr != nil {
+		return body, ce
+	}
+	un, uerr := io.ReadAll(gr)
+	_ = gr.Close()
+	if uerr != nil {
+		return body, ce
+	}
+	return un, ce
+}
+
+func encodeBody(data []byte, ce string) []byte {
+	if !strings.EqualFold(ce, "gzip") {
+		return data
+	}
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, _ = gw.Write(data)
+	_ = gw.Close()
+	return buf.Bytes()
 }
 
 // ModemProxy membuka halaman login modem secara transparan lewat server.
@@ -100,9 +186,9 @@ func ModemProxy(c *gin.Context) {
 	idStr := strconv.FormatInt(id, 10)
 	proxyPath := "/api/modem/proxy/" + idStr + "/"
 
-	// Autentikasi: token JWT diterima via ?token= pada kunjungan pertama, lalu
-	// disimpan sebagai cookie sesi agar asset halaman modem (URL relatif tanpa
-	// header Authorization) juga terautentikasi.
+	// Autentikasi: token JWT diterima via ?token=/Authorization header pada
+	// kunjungan pertama, lalu disimpan sebagai cookie sesi agar asset halaman
+	// modem (URL relatif tanpa header Authorization) juga terautentikasi.
 	cookieName := "mdm_proxy_" + idStr
 	token := c.Query("token")
 	if token == "" {
@@ -172,34 +258,28 @@ func ModemProxy(c *gin.Context) {
 			resp.Header.Del("Content-Security-Policy-Report-Only")
 			resp.Header.Del("X-Frame-Options")
 
-			ct := resp.Header.Get("Content-Type")
-			if !strings.Contains(strings.ToLower(ct), "text/html") || strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+			ct := strings.ToLower(resp.Header.Get("Content-Type"))
+			isHTML := strings.Contains(ct, "text/html")
+			isCSS := strings.Contains(ct, "text/css") || strings.Contains(ct, "application/x-css")
+			isJS := strings.Contains(ct, "javascript") || strings.Contains(ct, "ecmascript")
+			if !isHTML && !isCSS && !isJS {
 				return nil
 			}
-			body, rerr := io.ReadAll(resp.Body)
-			if rerr != nil {
-				resp.Body.Close()
-				return nil
+
+			data, ce := readBody(resp)
+			if isHTML {
+				data = []byte(rewriteHTML(string(data), ipAddress, proxyPath))
+			} else if isCSS {
+				s := rewriteCSSURLs(string(data), proxyPath)
+				s = rewriteAbsIP(s, ipAddress, proxyPath)
+				data = []byte(s)
+			} else if isJS {
+				data = []byte(rewriteAbsIP(string(data), ipAddress, proxyPath))
 			}
-			html := string(body)
-			baseTag := `<base href="` + proxyPath + `">`
-			// URL absolut-path (/... dari si modem) diarahkan kembali lewat proksi.
-			html = rewriteRootRelative(html, proxyPath)
-			idx := strings.Index(html, "<head")
-			if idx < 0 {
-				html = baseTag + html
-			} else {
-				closeIdx := strings.Index(html[idx:], ">")
-				if closeIdx < 0 {
-					html = baseTag + html
-				} else {
-					insertAt := idx + closeIdx + 1
-					html = html[:insertAt] + "\n" + baseTag + html[insertAt:]
-				}
-			}
-			resp.Body.Close()
-			resp.Body = io.NopCloser(bytes.NewBufferString(html))
-			resp.ContentLength = int64(len(html))
+
+			data = encodeBody(data, ce)
+			resp.Body = io.NopCloser(bytes.NewReader(data))
+			resp.ContentLength = int64(len(data))
 			resp.Header.Del("Content-Length")
 			return nil
 		},
