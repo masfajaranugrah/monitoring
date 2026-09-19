@@ -102,6 +102,30 @@ func rewritePathLiterals(s, prefix string) string {
 	})
 }
 
+// rewriteRedirect menyesuaikan header Location respons redirect (302/303/307)
+// agar navigasi tetap berada di dalam path proksi. ReverseProxy bawaan Go tidak
+// selalu menulis ulang Location absolut/root-relatif dari upstream, sehingga
+// browser bisa "keluar" ke root aplikasi (/start.ghtml).
+func rewriteRedirect(loc, prefix string) string {
+	l := strings.TrimSpace(loc)
+	if l == "" || strings.HasPrefix(l, "//") ||
+		strings.HasPrefix(strings.ToLower(l), "/api/modem/proxy") {
+		return l
+	}
+	if strings.HasPrefix(l, "/") {
+		return prefix + strings.TrimPrefix(l, "/")
+	}
+	u, err := url.Parse(l)
+	if err != nil || !u.IsAbs() {
+		return l
+	}
+	out := prefix + strings.TrimPrefix(u.Path, "/")
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	return out
+}
+
 func rewriteHTML(s, ip, prefix string) string {
 	// Teks <script>/<style>/komentar dibiarkan utuh; hanya atribut di dalam tag
 	// yang di-rewrite supaya logika skrip page-builder tidak rusak.
@@ -335,6 +359,30 @@ func ModemProxy(c *gin.Context) {
 	idStr := strconv.FormatInt(id, 10)
 	proxyPath := "/api/modem/proxy/" + idStr + "/"
 
+	// Skema/port diingat lewat cookie agar request lanjutan pasca-redirect
+	// (tanpa query ?scheme=&port=) tetap menuju target yang sama.
+	if _, has := c.GetQuery("scheme"); !has {
+		if v, verr := c.Cookie("mdm_proxy_scheme_" + idStr); verr == nil && (v == "http" || v == "https") {
+			scheme = v
+		}
+	}
+	if _, has := c.GetQuery("port"); !has {
+		if v, verr := c.Cookie("mdm_proxy_port_" + idStr); verr == nil {
+			if p, perr := strconv.Atoi(v); perr == nil && p > 0 && p < 65536 {
+				port = strconv.Itoa(p)
+			}
+		}
+	}
+	host = ipAddress
+	if p, perr := strconv.Atoi(port); perr == nil && p > 0 && p < 65536 {
+		host = net.JoinHostPort(ipAddress, strconv.Itoa(p))
+	}
+	target, err = url.Parse(scheme + "://" + host)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "target tidak valid"})
+		return
+	}
+
 	// Berkas shim navigasi disajikan langsung oleh server (tidak diteruskan ke
 	// modem) supaya bebas dari rewrite/modifikasi rocket-loader halaman modem.
 	if strings.HasSuffix(strings.ToLower(c.Param("path")), "__nav__.js") {
@@ -369,6 +417,20 @@ func ModemProxy(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     cookieName,
 		Value:    token,
+		Path:     proxyPath,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "mdm_proxy_scheme_" + idStr,
+		Value:    scheme,
+		Path:     proxyPath,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "mdm_proxy_port_" + idStr,
+		Value:    port,
 		Path:     proxyPath,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -415,6 +477,11 @@ func ModemProxy(c *gin.Context) {
 			resp.Header.Del("Content-Security-Policy")
 			resp.Header.Del("Content-Security-Policy-Report-Only")
 			resp.Header.Del("X-Frame-Options")
+
+			// Redirect (302 dst) diarahkan tetap lewat proksi, bukan ke root aplikasi.
+			if loc := resp.Header.Get("Location"); loc != "" {
+				resp.Header.Set("Location", rewriteRedirect(loc, proxyPath))
+			}
 
 			ct := strings.ToLower(resp.Header.Get("Content-Type"))
 			isHTML := strings.Contains(ct, "text/html")
