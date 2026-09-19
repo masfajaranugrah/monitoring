@@ -6,6 +6,9 @@ const ALARM_INTERVAL_MS = 700
 const MAX_PLAY_ATTEMPTS = 4
 const RETRY_DELAY_MS = 800
 
+// Event types that count as real user activation for Notification permission.
+const GESTURE_EVENTS = new Set(['pointerdown', 'mousedown', 'click', 'keydown', 'touchstart'])
+
 let audio = null
 let unlocked = false
 let pendingAlarm = false
@@ -38,7 +41,7 @@ function ensureAudio() {
   return audio
 }
 
-function handleUnlock() {
+function handleUnlock(event) {
   if (unlocked) return
   unlocked = true
 
@@ -52,8 +55,11 @@ function handleUnlock() {
     })
     .catch(() => {})
 
-  // Notification permission can only be requested from a real gesture.
-  requestNotifyPermission()
+  // Notification permission can only be requested from a genuine user gesture
+  // (click/key/touch) — not from mousemove/wheel/scroll movement.
+  if (event && GESTURE_EVENTS.has(event.type)) {
+    requestNotifyPermission()
+  }
 
   if (pendingAlarm) {
     pendingAlarm = false
