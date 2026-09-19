@@ -26,7 +26,8 @@ const targetUrl = computed(() => {
 const proxyUrl = computed(() => {
   if (!id.value) return ''
   const p = Number(port.value) || 80
-  return `/api/modem/proxy/${id.value}/?scheme=${scheme.value}&port=${p}`
+  const token = encodeURIComponent(localStorage.getItem('fm_token') || '')
+  return `/api/modem/proxy/${id.value}/?scheme=${scheme.value}&port=${p}&token=${token}`
 })
 
 function bump() {

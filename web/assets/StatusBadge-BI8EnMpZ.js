@@ -1,1 +1,0 @@
-import{o as e,c as n,a as t,t as o,n as l}from"./index-CLLzja7y.js";const p={__name:"StatusBadge",props:{status:{type:String,default:"OFFLINE"}},setup(a){return(r,s)=>(e(),n("span",{class:l(["badge",`badge--${(a.status||"OFFLINE").toLowerCase()}`])},[s[0]||(s[0]=t("span",{class:"badge__dot"},null,-1)),t("span",null,o(a.status),1)],2))}};export{p as _};

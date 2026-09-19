@@ -114,6 +114,7 @@ func ModemProxy(c *gin.Context) {
 			q := pr.Out.URL.Query()
 			q.Del("scheme")
 			q.Del("port")
+			q.Del("token")
 			pr.Out.URL.RawQuery = q.Encode()
 		},
 		Transport: &http.Transport{
