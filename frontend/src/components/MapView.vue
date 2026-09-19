@@ -250,6 +250,14 @@ async function loadFeatures() {
     const { data } = await api.get('/map/features')
     features.value = data.data || []
     renderFeatures()
+    // Auto-zoom ke area fitur bila peta masih di tampilan awal (zoom kecil),
+    // supaya hasil impor langsung terlihat.
+    if (features.value.length && map && map.getZoom() <= 6) {
+      const b = kmzBoundsFor(features.value)
+      if (b && b.isValid()) {
+        map.fitBounds(b.pad(0.08), { maxZoom: 16 })
+      }
+    }
   } catch (e) {
     // belum login / gagal: tampilan senyap, fitur kosong
   }
