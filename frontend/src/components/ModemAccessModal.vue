@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import api from '../api'
 
 const props = defineProps({
   customer: { type: Object, required: true }
@@ -10,6 +11,7 @@ const scheme = ref('http')
 const port = ref(80)
 const frameKey = ref(0)
 const loaded = ref(false)
+const warming = ref(false)
 
 const ip = computed(() => (props.customer?.ip_address || '').trim())
 const id = computed(() => props.customer?.id)
@@ -26,12 +28,31 @@ const targetUrl = computed(() => {
 const proxyUrl = computed(() => {
   if (!id.value) return ''
   const p = Number(port.value) || 80
-  const token = encodeURIComponent(localStorage.getItem('fm_token') || '')
-  return `/api/modem/proxy/${id.value}/?scheme=${scheme.value}&port=${p}&token=${token}`
+  return `/api/modem/proxy/${id.value}/?scheme=${scheme.value}&port=${p}`
 })
 
-function bump() {
+// "Pemanasan" dulu via axios (token dikirim lewat header Authorization interceptor,
+// tidak pernah tampil di URL) supaya cookie sesi modem terpasang. Iframe & tab
+// berikutnya memakai URL bersih yang terautentikasi oleh cookie tersebut.
+async function warm() {
+  if (!id.value) return
+  warming.value = true
+  try {
+    await api.get(`/modem/proxy/${id.value}/?scheme=${scheme.value}&port=${Number(port.value) || 80}`, {
+      withCredentials: true,
+      maxRedirects: 0,
+      proxy: false
+    })
+  } catch (e) {
+    // Tanggapan 401/4xx/5xx dari modem tetap sudah memasang cookie sebelum body.
+  } finally {
+    warming.value = false
+  }
+}
+
+async function bump() {
   loaded.value = false
+  await warm()
   frameKey.value++
 }
 
@@ -44,6 +65,8 @@ function useScheme(s) {
 function openNewTab() {
   if (proxyUrl.value) window.open(proxyUrl.value, '_blank')
 }
+
+onMounted(bump)
 </script>
 
 <template>
@@ -85,12 +108,12 @@ function openNewTab() {
       </div>
 
       <div class="modal__body">
-        <div v-if="!loaded" class="modem-loading">Memuat halaman login modem...</div>
+        <div v-if="warming || !loaded" class="modem-loading">{{ warming ? 'Menghubungkan...' : 'Memuat halaman login modem...' }}</div>
         <iframe :key="frameKey" :src="proxyUrl" class="modem-frame" @load="loaded = true"></iframe>
       </div>
 
       <p class="modem-note">
-        Halaman disajikan lewat server (same-origin), jadi tidak ada masalah mixed-content maupun
+        Halaman disajikan lewat server (same-origin) sehingga tidak ada masalah mixed-content maupun
         X-Frame-Options. Jika tampak kosong, modem tidak dapat dijangkau server — coba ganti scheme/port,
         atau gunakan <strong>Buka di tab baru</strong>.
       </p>
