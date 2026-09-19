@@ -30,6 +30,7 @@ var (
 	metaRefreshRe  = regexp.MustCompile(`(?i)(\bhttp-equiv\s*=\s*["']refresh["'][^>]*\bcontent\s*=\s*["'][^"']*\burl\s*=\s*)([^;"']+)`)
 	baseTagRe      = regexp.MustCompile(`(?i)(<base\b[^>]*\bhref\s*=\s*["'])([^"']*)(["'])`)
 	pathLitRe      = regexp.MustCompile(`(?i)(["'])(/[^"'\s]*\.(?:ghtml|shtm|shtml|cgi|asp|aspx|php|do|action|html|htm|css|js|png|jpe?g|gif|ico|svg|json|xml|txt|bin|dat))(["'])`)
+	badProxyRe     = regexp.MustCompile(`(?i)(/api/modem/proxy/)([^/"')]*)`)
 )
 
 // rewriteRootRelative menambahkan prefiks proksi pada URL absolut-path
@@ -63,6 +64,63 @@ func rewriteAbsIP(s, ip, prefix string) string {
 
 func rewriteCSSURLs(s, prefix string) string {
 	return cssUrlRe.ReplaceAllString(s, `url(${1}`+prefix+`$2`)
+}
+
+// fixBrokenProxy menormalkan referensi "/api/modem/proxy/<path tanp.id>/..."
+// yang (entah dari mana asalnya) jatuh tanpa id pelanggan, menjadi
+// "/api/modem/proxy/<id>/...". Referensi yang sudah benar dibiarkan.
+func fixBrokenProxy(s, prefix string) string {
+	return badProxyRe.ReplaceAllStringFunc(s, func(m string) string {
+		idx := badProxyRe.FindStringSubmatchIndex(m)
+		if idx == nil {
+			return m
+		}
+		seg := m[idx[4]:idx[5]]
+		if seg != "" {
+			allDigits := true
+			for _, r := range seg {
+				if r < '0' || r > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				return m
+			}
+		}
+		return prefix + seg
+	})
+}
+
+// scanBadProxy mengembalikan cuplikan di sekitar referensi proksi yang
+// kehilangan id pelanggan (untuk keperluan diagnosa).
+func scanBadProxy(s string) []string {
+	var out []string
+	lower := strings.ToLower(s)
+	start := 0
+	for {
+		i := strings.Index(lower[start:], "/api/modem/proxy/")
+		if i < 0 {
+			return out
+		}
+		i += start
+		end := i + len("/api/modem/proxy/")
+		if end < len(lower) && lower[end] >= '0' && lower[end] <= '9' {
+			start = end
+			continue
+		}
+		lo := i - 40
+		if lo < 0 {
+			lo = 0
+		}
+		hi := end + 80
+		if hi > len(s) {
+			hi = len(s)
+		}
+		snip := strings.ReplaceAll(s[lo:hi], "\n", `\n`)
+		out = append(out, snip)
+		start = end
+	}
 }
 
 func rewriteMetaRefresh(html, prefix string) string {
@@ -134,6 +192,12 @@ func rewriteHTML(s, ip, prefix string) string {
 	s = rewriteAbsIP(s, ip, prefix)
 	s = rewriteCSSURLs(s, prefix)
 	s = rewriteMetaRefresh(s, prefix)
+	if bad := scanBadProxy(s); len(bad) > 0 {
+		for _, b := range bad {
+			log.Printf("[modem] proxy-tanpa-id di html: %s", b)
+		}
+	}
+	s = fixBrokenProxy(s, prefix)
 
 	// Shim navigasi dimuat sebagai berkas JS eksternal (bukan inline) dengan
 	// data-rocket-ignore supaya rocket-loader/WP-Rocket di halaman modem tidak
@@ -148,14 +212,15 @@ func rewriteHTML(s, ip, prefix string) string {
 		if insertAt < 0 {
 			return nav + s
 		}
-		return s[:insertAt] + "\n" + nav + s[insertAt:]
+		return s[:insertAt] + nav + s[insertAt:]
 	}
-	// Tidak ada <base>: sematkan <base> proksi + tag skrip shim sekaligus.
-	nav = `<base href="` + prefix + `">\n` + nav
+	// Tidak ada <base>: sematkan <base> proksi + tag skrip shim sekaligus
+	// (tanpa baris baru agar tidak meninggalkan teks "\n" di halaman).
+	nav = `<base href="` + prefix + `">` + nav
 	if insertAt < 0 {
 		return nav + s
 	}
-	return s[:insertAt] + "\n" + nav + s[insertAt:]
+	return s[:insertAt] + nav + s[insertAt:]
 }
 
 // rewriteHtmlAttrs mengubah atribut (href/src/action/formaction) hanya di dalam
@@ -498,9 +563,17 @@ func ModemProxy(c *gin.Context) {
 			} else if isCSS {
 				s := rewriteCSSURLs(string(data), proxyPath)
 				s = rewriteAbsIP(s, ipAddress, proxyPath)
+				if bad := scanBadProxy(s); len(bad) > 0 {
+					for _, b := range bad {
+						log.Printf("[modem] proxy-tanpa-id di css: %s", b)
+					}
+				}
+				s = fixBrokenProxy(s, proxyPath)
 				data = []byte(s)
 			} else if isJS {
-				data = []byte(rewriteAbsIP(string(data), ipAddress, proxyPath))
+				s := rewriteAbsIP(string(data), ipAddress, proxyPath)
+				s = fixBrokenProxy(s, proxyPath)
+				data = []byte(s)
 			}
 
 			data = encodeBody(data, ce)
