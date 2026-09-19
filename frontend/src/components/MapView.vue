@@ -524,10 +524,14 @@ async function onKmzFile(e) {
   kmzBusy = true
   try {
     const kmz = await parseKmzFile(file)
-    const { data } = await api.post('/map/features/bulk', {
-      source: 'kmz',
-      features: kmz.features
-    })
+    const { data } = await api.post(
+      '/map/features/bulk',
+      {
+        source: 'kmz',
+        features: kmz.features
+      },
+      { timeout: 300000 }
+    )
     const created = data.data || []
     importedKmzIds = created.map((f) => f.id)
     await loadFeatures()

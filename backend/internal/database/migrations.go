@@ -155,6 +155,16 @@ CREATE TABLE IF NOT EXISTS map_features (
 
 CREATE INDEX IF NOT EXISTS idx_map_features_type ON map_features(feature_type);
 CREATE INDEX IF NOT EXISTS idx_map_features_created ON map_features(created_at DESC);
+
+-- Ensure map_features stays compatible with current app version even if the
+-- table was created by an older release.
+ALTER TABLE IF EXISTS map_features ADD COLUMN IF NOT EXISTS icon VARCHAR(30) NOT NULL DEFAULT 'dot';
+ALTER TABLE IF EXISTS map_features ADD COLUMN IF NOT EXISTS color VARCHAR(20) NOT NULL DEFAULT '#3b82f6';
+ALTER TABLE IF EXISTS map_features ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
+ALTER TABLE IF EXISTS map_features ADD COLUMN IF NOT EXISTS properties JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE IF EXISTS map_features ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'manual';
+ALTER TABLE IF EXISTS map_features ADD COLUMN IF NOT EXISTS created_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE IF EXISTS map_features ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 `
 
 func RunMigrations(ctx context.Context) error {
@@ -163,6 +173,37 @@ func RunMigrations(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	verifyMapFeaturesColumns(ctx)
 	log.Println("Database migrations completed")
 	return nil
+}
+
+// verifyMapFeaturesColumns memeriksa apakah kolom kritis tabel map_features
+// punya tipe yang benar. Kalau server punya tabel lama dengan tipe berbeda
+// (mis. geometry PostGIS, properties json), impor akan gagal di semua baris.
+func verifyMapFeaturesColumns(ctx context.Context) {
+	rows, err := Pool.Query(ctx, `
+		SELECT column_name, data_type
+		FROM information_schema.columns
+		WHERE table_name = 'map_features' AND column_name IN ('geometry', 'properties')`)
+	if err != nil {
+		log.Printf("[map] peringatan: tidak bisa memeriksa skema map_features: %v", err)
+		return
+	}
+	defer rows.Close()
+	cols := map[string]string{}
+	for rows.Next() {
+		var name, t string
+		_ = rows.Scan(&name, &t)
+		cols[name] = t
+	}
+	if t, ok := cols["geometry"]; ok && t != "jsonb" {
+		log.Printf("[map] PERINGATAN: kolom map_features.geometry bertipe %s (seharusnya jsonb). Impor KML/KMZ akan gagal: %v", t, rows.Err())
+	}
+	if t, ok := cols["properties"]; ok && t != "jsonb" {
+		log.Printf("[map] PERINGATAN: kolom map_features.properties bertipe %s (seharusnya jsonb). Impor KML/KMZ bisa gagal.", t)
+	}
+	if _, ok := cols["geometry"]; !ok {
+		log.Printf("[map] PERINGATAN: tabel map_features tidak ditemukan atau tidak punya kolom geometry.")
+	}
 }

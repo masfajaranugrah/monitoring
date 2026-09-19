@@ -178,7 +178,7 @@ func main() {
 	srv := &http.Server{
 		Addr:         ":" + cfg.ServerPort,
 		Handler:      r,
-		ReadTimeout:  15 * time.Second,
+		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 300 * time.Second,
 	}
 

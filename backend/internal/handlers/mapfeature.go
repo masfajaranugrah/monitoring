@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -394,9 +395,21 @@ func BulkImportMapFeatures(c *gin.Context) {
 			userID = &v
 		}
 	}
+	// Token lama atau akun yang sudah dihapus bisa membawa user_id yang tidak
+	// ada di tabel users -> FK map_features_created_by_fkey (23503) membuat
+	// SEMUA insert gagal. Kalau user tak ditemukan, isi created_by dengan NULL
+	// biar impor tetap berhasil.
+	if userID != nil {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`, *userID).Scan(&exists); err != nil || !exists {
+			log.Printf("[map] peringatan: user_id %d tidak ditemukan di tabel users; created_by diisi NULL (login ulang untuk atribusi benar)", *userID)
+			userID = nil
+		}
+	}
 
 	created := make([]map[string]interface{}, 0)
 	skipped := 0
+	firstSkipReason := ""
 	for i, feat := range in.Features {
 		// Placemark/folder kosong di KMZ/KML tidak punya geometri -> dilewati,
 		// supaya satu elemen kosong tidak menggagalkan seluruh impor.
@@ -457,6 +470,9 @@ func BulkImportMapFeatures(c *gin.Context) {
 			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT import_feature")
 			_, _ = tx.Exec(ctx, "RELEASE SAVEPOINT import_feature")
 			skipped++
+			if firstSkipReason == "" {
+				firstSkipReason = err.Error()
+			}
 			log.Printf("[map] fitur dilewati saat impor: %q (%s): %v", name, g.Type, err)
 			continue
 		}
@@ -474,7 +490,12 @@ func BulkImportMapFeatures(c *gin.Context) {
 	}
 
 	if len(created) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tidak ada fitur valid untuk diimpor"})
+		log.Printf("[map] impor dibatalkan: 0 fitur tersimpan (total=%d, dilewati=%d)", len(in.Features), skipped)
+		msg := fmt.Sprintf("tidak ada fitur yang berhasil disimpan (%d dari %d dilewati)", skipped, len(in.Features))
+		if firstSkipReason != "" {
+			msg += " · " + firstSkipReason
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
 
