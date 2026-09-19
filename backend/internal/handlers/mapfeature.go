@@ -91,7 +91,8 @@ func ListMapFeatures(c *gin.Context) {
 		FROM map_features
 		ORDER BY created_at ASC, id ASC`)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal memuat fitur peta"})
+		log.Printf("[map] gagal memuat fitur: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal memuat fitur peta: " + err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -114,7 +115,8 @@ func ListMapFeatures(c *gin.Context) {
 		)
 		if err := rows.Scan(&id, &name, &featureType, &icon, &color, &desc,
 			&geometryB, &propertiesB, &source, &createdBy, &createdAt, &updatedAt); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal membaca fitur peta"})
+			log.Printf("[map] gagal membaca fitur: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal membaca fitur peta: " + err.Error()})
 			return
 		}
 		var geometry json.RawMessage = geometryB
@@ -181,6 +183,15 @@ func CreateMapFeature(c *gin.Context) {
 			userID = &v
 		}
 	}
+	// Id dari token lama/akun terhapus tidak ada di users -> FK 23503 membuat
+	// simpan fitur gagal total. Isi NULL supaya tetap tersimpan.
+	if userID != nil {
+		var exists bool
+		if err := database.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`, *userID).Scan(&exists); err != nil || !exists {
+			log.Printf("[map] peringatan: user_id %d tidak ditemukan di tabel users; created_by diisi NULL", *userID)
+			userID = nil
+		}
+	}
 
 	var (
 		id        int64
@@ -194,7 +205,8 @@ func CreateMapFeature(c *gin.Context) {
 		in.Name, in.FeatureType, in.Icon, in.Color, descriptionString(in.Description), string(in.Geometry), string(in.Properties), in.Source, userID,
 	).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal menyimpan fitur peta"})
+		log.Printf("[map] simpan fitur gagal: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal menyimpan fitur peta: " + err.Error()})
 		return
 	}
 
@@ -335,7 +347,8 @@ func DeleteMapFeature(c *gin.Context) {
 
 	tag, err := database.Pool.Exec(ctx, `DELETE FROM map_features WHERE id = $1`, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal menghapus fitur peta"})
+		log.Printf("[map] gagal menghapus %d: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal menghapus fitur peta: " + err.Error()})
 		return
 	}
 	if tag.RowsAffected() == 0 {
