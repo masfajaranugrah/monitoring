@@ -265,7 +265,6 @@ function toggleDraw(mode) {
 
 function openFeatureModal() {
   featureEditId.value = null
-  featureEditSource.value = null
   featureForm.value = { name: '', icon: 'dot', color: FEATURE_COLORS[0], description: '' }
   featureError.value = ''
   showFeatureModal.value = true

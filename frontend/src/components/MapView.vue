@@ -101,9 +101,9 @@ function featureDivIcon(f) {
   return L.divIcon({
     className: '',
     html: `<div class="fm-icon ${isDot ? 'fm-icon--dot' : ''}" style="--fm-color:${color}">${svg}</div>`,
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
-    popupAnchor: [0, -14]
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+    popupAnchor: [0, -18]
   })
 }
 
@@ -305,16 +305,20 @@ function flyTo(lat, lng, zoom = 12, label = '') {
 }
 
 // ---------- Alat gambar (jalur / area / titik informasi) ----------
-function clearDrawPreview() {
+function removeDrawPreviewLayer() {
   if (drawPreview) {
     if (map) map.removeLayer(drawPreview)
     drawPreview = null
   }
+}
+
+function clearDrawPreview() {
+  removeDrawPreviewLayer()
   drawVerts.length = 0
 }
 
 function updateDrawPreview() {
-  clearDrawPreview()
+  removeDrawPreviewLayer()
   if (drawVerts.length < 2) return
   drawPreview = L.polyline(drawVerts, {
     color: '#f43f5e',
