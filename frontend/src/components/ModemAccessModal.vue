@@ -104,7 +104,13 @@ onMounted(bump)
 
       <div class="modal__body">
         <div v-if="warming || !loaded" class="modem-loading">{{ warming ? 'Menghubungkan...' : 'Memuat halaman login modem...' }}</div>
-        <iframe :key="frameKey" :src="proxyUrl" class="modem-frame" @load="loaded = true"></iframe>
+        <iframe
+          :key="frameKey"
+          :src="proxyUrl"
+          class="modem-frame"
+          sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
+          @load="loaded = true"
+        ></iframe>
       </div>
 
       <p class="modem-note">
