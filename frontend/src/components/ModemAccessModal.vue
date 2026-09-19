@@ -50,10 +50,28 @@ async function warm() {
   }
 }
 
+let autoOpened = false
+
 async function bump() {
   loaded.value = false
   await warm()
   frameKey.value++
+  // Otomatis buka tab baru saat modal pertama dibuka (masih dalam jendela
+  // "user activation" dari klik "Akses Modem", jadi popup diperbolehkan).
+  if (!autoOpened && proxyUrl.value) {
+    const w = window.open(proxyUrl.value, '_blank', 'noopener')
+    if (w) autoOpened = true
+  }
+}
+
+// Buka halaman modem di tab baru: top-level tanpa sandbox, jadi navigasi
+// penuh halaman milik modem tidak diblokir. Token terautentikasi lewat
+// cookie yang sudah dipasang warm().
+async function openTab() {
+  if (!proxyUrl.value) return
+  await warm()
+  const w = window.open(proxyUrl.value, '_blank', 'noopener')
+  if (!w) window.location.assign(proxyUrl.value)
 }
 
 function useScheme(s) {
@@ -98,6 +116,7 @@ onMounted(bump)
         <span class="modem-bar__url mono">{{ proxyUrl }}</span>
 
         <div class="modem-bar__actions">
+          <button type="button" class="btn btn--sm" @click="openTab">Buka di tab baru</button>
           <button type="button" class="btn btn--ghost btn--sm" @click="bump">Muat ulang</button>
         </div>
       </div>
@@ -114,8 +133,8 @@ onMounted(bump)
       </div>
 
       <p class="modem-note">
-        Halaman disajikan lewat server (same-origin) sehingga tidak ada masalah mixed-content maupun
-        X-Frame-Options. Jika tampak kosong, coba ganti scheme/port lalu <strong>Muat ulang</strong>.
+        Halaman modem otomatis dibuka di tab baru. Jika tab tidak muncul (popup diblokir browser), klik
+        <strong>Buka di tab baru</strong>. Iframe di bawah adalah tampilan cepat di dalam modal.
       </p>
     </div>
   </div>

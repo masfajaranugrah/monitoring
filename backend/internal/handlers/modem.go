@@ -171,19 +171,30 @@ func navShim(prefix string) string {
 		}
 		return u;
 	}
-	function g(d){
-		try{
-			var real=d.location;
-			Object.defineProperty(d,'location',{
-				get:function(){return real},
-				set:function(v){
-					var n=f(v);
-					if(n!==v){real.replace(n)}else{real.href=v}
-				},
-				configurable:true
-			});
-		}catch(e){}
-	}
+function g(d){
+	try{
+		var real=d.location;
+		Object.defineProperty(d,'location',{
+			get:function(){return real},
+			set:function(v){
+				var n=f(v);
+				if(n!==v){real.replace(n)}else{real.href=v}
+			},
+			configurable:true
+		});
+		// top/parent.location.href = ... juga dicegat (langsung ubah properti Location).
+		if(d!==window){
+			try{
+				var snap=real.href;
+				Object.defineProperty(real,'href',{
+					get:function(){return snap},
+					set:function(v){real.replace(f(v))},
+					configurable:true
+				});
+			}catch(e){}
+		}
+	}catch(e){}
+}
 	g(window);
 	try{if(top&&top!==self){g(top)}}catch(e){}
 	try{if(parent&&parent!==self&&parent!==top){g(parent)}}catch(e){}
