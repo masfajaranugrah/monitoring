@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import LatencyBadge from '../components/LatencyBadge.vue'
 import LatencyChart from '../components/LatencyChart.vue'
 import { customerIconSvg, statusColor } from '../services/customerIcons'
+import ModemAccessModal from '../components/ModemAccessModal.vue'
 
 const props = defineProps({ id: { type: [String, Number], required: true } })
 const router = useRouter()
@@ -14,6 +15,7 @@ const customer = ref(null)
 const history = ref([])
 const loading = ref(true)
 const historyLimit = ref(200)
+const showModemModal = ref(false)
 
 async function load() {
   loading.value = true
@@ -80,6 +82,10 @@ onUnmounted(() => {
       <div class="detail__head-right">
         <StatusBadge :status="customer.status" />
         <LatencyBadge :latency="customer.latency_ms" />
+        <button class="btn btn--primary btn--sm" @click="showModemModal = true">
+          <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2 15.5 7.5M21 2l-5 5-4-2-2.5 2.5 4 4L8 18l-4 1 2 2 2-1 2.5-2.5 4 4L17 18l-2-4 5-5z"/><path d="M13 11l4-4"/></svg>
+          Akses Modem
+        </button>
         <button class="btn btn--ghost btn--sm" @click="router.push('/customers')">Kembali</button>
       </div>
     </div>
@@ -154,4 +160,6 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+
+  <ModemAccessModal v-if="showModemModal" :ip="customer.ip_address" @close="showModemModal = false" />
 </template>

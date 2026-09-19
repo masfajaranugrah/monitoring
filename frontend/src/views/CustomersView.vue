@@ -7,6 +7,7 @@ import LatencyBadge from '../components/LatencyBadge.vue'
 import { useMonitorStore } from '../stores/monitor'
 import { useAuthStore } from '../stores/auth'
 import { CUSTOMER_ICONS, customerIconSvg, statusColor } from '../services/customerIcons'
+import ModemAccessModal from '../components/ModemAccessModal.vue'
 
 const router = useRouter()
 const monitor = useMonitorStore()
@@ -26,6 +27,7 @@ const sortOrder = ref('asc')
 
 const loading = ref(true)
 const showModal = ref(false)
+const modemCustomer = ref(null)
 const editing = ref(null)
 const form = ref(emptyForm())
 const saving = ref(false)
@@ -273,6 +275,10 @@ onMounted(() => {
             </td>
             <td class="crud__actions">
               <button class="btn btn--ghost btn--sm" @click.stop="openEdit(c)">Edit</button>
+              <button class="btn btn--ghost btn--sm" @click.stop="modemCustomer = c" title="Akses halaman modem">
+                <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2 15.5 7.5M21 2l-5 5-4-2-2.5 2.5 4 4L8 18l-4 1 2 2 2-1 2.5-2.5 4 4L17 18l-2-4 5-5z"/></svg>
+                Modem
+              </button>
               <button v-if="auth.isAdmin" class="btn btn--dangerghost btn--sm" @click.stop="deleting = c">Hapus</button>
             </td>
           </tr>
@@ -370,5 +376,7 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <ModemAccessModal v-if="modemCustomer" :ip="modemCustomer.ip_address" @close="modemCustomer = null" />
   </div>
 </template>
