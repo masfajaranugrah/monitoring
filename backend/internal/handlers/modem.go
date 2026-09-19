@@ -81,12 +81,17 @@ func rewriteMetaRefresh(html, prefix string) string {
 }
 
 func rewriteHTML(s, ip, prefix string) string {
-	s = rewriteRootRelative(s, prefix)
+	// Teks <script>/<style>/komentar dibiarkan utuh; hanya atribut di dalam tag
+	// yang di-rewrite supaya logika skrip page-builder tidak rusak.
+	s = rewriteHtmlAttrs(s, prefix)
 	s = rewriteAbsIP(s, ip, prefix)
 	s = rewriteCSSURLs(s, prefix)
 	s = rewriteMetaRefresh(s, prefix)
 
-	inject := `<script>(function(){try{var p=` + strconv.Quote(prefix) + `;function f(u){if(typeof u==='string'&&u.charAt(0)==='/'&&u.charAt(1)!=='/'&&u.indexOf('/api/modem/proxy')!==0){return p+u.replace(/^\\//,'')}return u}function g(d){try{Object.defineProperty(d,'location',{get:function(){return window.location},set:function(v){var n=f(v);if(n!==v){location.replace(n)}else{location.href=v}},configurable:true})}catch(e){}}g(window);try{if(top&&top!==self){g(top);try{Object.defineProperty(top,'opener',{value:window,configurable:true})}catch(e){}}}catch(e){}}catch(e){}})();</script>`
+	// Shim navigasi dimuat sebagai berkas JS eksternal (bukan inline) dengan
+	// data-rocket-ignore supaya rocket-loader/WP-Rocket di halaman modem tidak
+	// mendefer/mengubahnya.
+	nav := `<script src="` + prefix + `__nav__.js" data-rocket-ignore></script>`
 
 	insertAt := headInsertPoint(s)
 	if baseTagRe.MatchString(s) {
@@ -94,16 +99,96 @@ func rewriteHTML(s, ip, prefix string) string {
 		// (aturan HTML: hanya <base> pertama yang dihormati).
 		s = rewriteBase(s, prefix)
 		if insertAt < 0 {
-			return inject + s
+			return nav + s
 		}
-		return s[:insertAt] + "\n" + inject + s[insertAt:]
+		return s[:insertAt] + "\n" + nav + s[insertAt:]
 	}
-	// Tidak ada <base>: sematkan <base> proksi + shim navigasi sekaligus.
-	inject = `<base href="` + prefix + `">\n` + inject
+	// Tidak ada <base>: sematkan <base> proksi + tag skrip shim sekaligus.
+	nav = `<base href="` + prefix + `">\n` + nav
 	if insertAt < 0 {
-		return inject + s
+		return nav + s
 	}
-	return s[:insertAt] + "\n" + inject + s[insertAt:]
+	return s[:insertAt] + "\n" + nav + s[insertAt:]
+}
+
+// rewriteHtmlAttrs mengubah atribut (href/src/action/formaction) hanya di dalam
+// tag HTML. Daerah komentar, <script> dan <style> disalin verbatim agar isi
+// kode milik halaman modem tidak berubah.
+func rewriteHtmlAttrs(s, prefix string) string {
+	var buf strings.Builder
+	buf.Grow(len(s))
+	rest := s
+	for {
+		lt := strings.IndexByte(rest, '<')
+		if lt < 0 {
+			buf.WriteString(rest)
+			return buf.String()
+		}
+		low := strings.ToLower(rest[lt:])
+		if strings.HasPrefix(low, "<!--") {
+			if end := strings.Index(rest[lt:], "-->"); end >= 0 {
+				buf.WriteString(rest[:lt+end+3])
+				rest = rest[lt+end+3:]
+				continue
+			}
+			buf.WriteString(rest)
+			return buf.String()
+		}
+		if strings.HasPrefix(low, "<script") {
+			if end := strings.Index(rest[lt:], "</script>"); end >= 0 {
+				buf.WriteString(rest[:lt+end+len("</script>")])
+				rest = rest[lt+end+len("</script>"):]
+				continue
+			}
+		}
+		if strings.HasPrefix(low, "<style") {
+			if end := strings.Index(rest[lt:], "</style>"); end >= 0 {
+				buf.WriteString(rest[:lt+end+len("</style>")])
+				rest = rest[lt+end+len("</style>"):]
+				continue
+			}
+		}
+		gt := strings.IndexByte(rest[lt:], '>')
+		if gt < 0 {
+			buf.WriteString(rest)
+			return buf.String()
+		}
+		tag := rest[lt : lt+gt+1]
+		buf.WriteString(rewriteRootRelative(tag, prefix))
+		rest = rest[lt+gt+1:]
+	}
+}
+
+// navShim adalah skrip yang menahan navigasi absolut-path milik halaman modem
+// (termasuk top/parent) supaya tetap di dalam iframe proksi, bukan keluar modal.
+func navShim(prefix string) string {
+	return `(function(){
+(function(){
+	var p=(` + strconv.Quote(prefix) + `);
+	function f(u){
+		if(typeof u==='string' && u.charAt(0)==='/' && u.charAt(1)!=='/' && u.indexOf('/api/modem/proxy')!==0){
+			return p+u.replace(/^\//,'');
+		}
+		return u;
+	}
+	function g(d){
+		try{
+			var real=d.location;
+			Object.defineProperty(d,'location',{
+				get:function(){return real},
+				set:function(v){
+					var n=f(v);
+					if(n!==v){real.replace(n)}else{real.href=v}
+				},
+				configurable:true
+			});
+		}catch(e){}
+	}
+	g(window);
+	try{if(top&&top!==self){g(top)}}catch(e){}
+	try{if(parent&&parent!==self&&parent!==top){g(parent)}}catch(e){}
+})();
+})();`
 }
 
 // rewriteBase mengubah nilai href elemen <base> pertama menjadi prefix proksi.
@@ -215,6 +300,15 @@ func ModemProxy(c *gin.Context) {
 
 	idStr := strconv.FormatInt(id, 10)
 	proxyPath := "/api/modem/proxy/" + idStr + "/"
+
+	// Berkas shim navigasi disajikan langsung oleh server (tidak diteruskan ke
+	// modem) supaya bebas dari rewrite/modifikasi rocket-loader halaman modem.
+	if strings.HasSuffix(strings.ToLower(c.Param("path")), "__nav__.js") {
+		c.Header("Content-Type", "application/javascript; charset=utf-8")
+		c.Header("Cache-Control", "no-store")
+		_, _ = c.Writer.WriteString(navShim(proxyPath))
+		return
+	}
 
 	// Autentikasi: token JWT diterima via ?token=/Authorization header pada
 	// kunjungan pertama, lalu disimpan sebagai cookie sesi agar asset halaman
