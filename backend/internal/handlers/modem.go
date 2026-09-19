@@ -385,6 +385,29 @@ func encodeBody(data []byte, ce string) []byte {
 	return buf.Bytes()
 }
 
+// stripProxyQuery menghapus parameter milik proksi (scheme, port, token) dari
+// query string tanpa mengubah urutan/encoding param lain, supaya permintaan
+// yang diteruskan ke modem identik dengan yang dikirim UI perangkat aslinya.
+func stripProxyQuery(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Split(raw, "&")
+	kept := parts[:0]
+	for _, p := range parts {
+		key := p
+		if i := strings.IndexByte(p, '='); i >= 0 {
+			key = p[:i]
+		}
+		switch key {
+		case "scheme", "port", "token":
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return strings.Join(kept, "&")
+}
+
 // proxyIDFromReferer menebak id pelanggan dari header Referer ketika sebuah
 // request proksi tiba tanpa id yang sah (misal asset halaman modem yang URL-nya
 // dibangun di runtime oleh JavaScript sehingga jatuh menjadi
@@ -588,11 +611,10 @@ func ModemProxy(c *gin.Context) {
 			pr.Out.URL.Path = sub
 			pr.Out.URL.Scheme = target.Scheme
 			pr.Out.URL.Host = target.Host
-			q := pr.Out.URL.Query()
-			q.Del("scheme")
-			q.Del("port")
-			q.Del("token")
-			pr.Out.URL.RawQuery = q.Encode()
+			// Hapus parameter milik proksi tanpa mengubah urutan/encoding query
+			// asli. q.Encode() mengurutkan ulang parameter (pid&nextpage dibalik
+			// jadi nextpage&pid) dan bisa membingungkan CGI .gch milik modem.
+			pr.Out.URL.RawQuery = stripProxyQuery(pr.Out.URL.RawQuery)
 		},
 		Transport: &http.Transport{
 			Proxy:                 nil,

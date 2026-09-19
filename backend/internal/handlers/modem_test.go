@@ -8,6 +8,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestStripProxyQuery(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"pid=1002&nextpage=manager_dev_ping_t.gch", "pid=1002&nextpage=manager_dev_ping_t.gch"},
+		{"nextpage=x.gch&pid=1002", "nextpage=x.gch&pid=1002"},
+		{"pid=1002&scheme=http&nextpage=app_ddns_conf_t.gch&port=80&token=abc",
+			"pid=1002&nextpage=app_ddns_conf_t.gch"},
+		{"", ""},
+		{"scheme=https", ""},
+	}
+	for _, tt := range tests {
+		if got := stripProxyQuery(tt.in); got != tt.want {
+			t.Errorf("stripProxyQuery(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestProxyIDFromReferer(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
