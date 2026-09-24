@@ -1,0 +1,21 @@
+# Environment (berisi secret — JANGAN di-push)
+.env
+*.env
+
+# Data runtime lokal (PostgreSQL data, log)
+.data/
+
+# Build output
+bin/
+dist/
+
+# Dependencies
+frontend/node_modules/
+backend/vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

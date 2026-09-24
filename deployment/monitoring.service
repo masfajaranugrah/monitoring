@@ -1,0 +1,38 @@
+# /etc/systemd/system/monitoring.service
+# Monitoring engine (Go backend)
+#
+# Install:
+#   sudo cp deployment/monitoring.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now monitoring
+
+[Unit]
+Description=ISP Connection Monitoring Service
+Documentation=https://github.com/your-org/monitoring
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/monitoring
+ExecStart=/opt/monitoring/bin/monitoring-server
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Environment
+EnvironmentFile=/opt/monitoring/.env
+Environment=GIN_MODE=release
+
+# Keamanan minimum
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+# VPN tunnel & ping memerlukan akses root/net admin:
+# ReadWritePaths=/etc/ppp /tmp /run
+
+[Install]
+WantedBy=multi-user.target
