@@ -5,6 +5,16 @@ import 'leaflet.markercluster'
 import { parseKmzFile } from '../services/kmz'
 import { customerIconSvg, statusColor } from '../services/customerIcons'
 import { mapsUrl } from '../services/share'
+import {
+  haversine,
+  pathLength,
+  segmentLengths,
+  ringArea,
+  dedupePoints,
+  formatDistance,
+  formatArea,
+  metricsSummary
+} from '../services/geo'
 import api from '../api'
 
 const props = defineProps({
@@ -17,7 +27,7 @@ const props = defineProps({
   manageFeatures: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['open-detail', 'map-click', 'draw-complete', 'feature-manage'])
+const emit = defineEmits(['open-detail', 'map-click', 'draw-complete', 'feature-manage', 'measure-change'])
 
 const mapEl = ref(null)
 const kmzFileInput = ref(null)
@@ -55,6 +65,181 @@ const drawHintText = computed(() => {
   if (drawMode.value === 'polygon') return 'Klik peta untuk menambah titik area — klik 2x / klik kanan untuk selesai'
   return ''
 })
+
+const drawMetricsText = computed(() => {
+  const pts = dedupePoints(drawVerts)
+  if (!pts.length) return ''
+  if (drawMode.value === 'line') return formatDistance(pathLength(pts))
+  if (drawMode.value === 'polygon') {
+    const total = formatDistance(pathLength(pts))
+    if (pts.length < 3) return total
+    return `${total} · ${formatArea(ringArea(pts))}`
+  }
+  return ''
+})
+
+// ---------- Mode ukur jarak (cek jarak sederhana) ----------
+const measureActive = ref(false)
+const measurePts = ref([])
+const measureHover = ref(null)
+let measureLayer = null
+let measureRaf = 0
+
+const measurePoints = computed(() => dedupePoints(measurePts.value))
+const measureTotal = computed(() => pathLength(measurePoints.value))
+
+const hintText = computed(() => {
+  if (measureActive.value) return 'Klik peta untuk menandai titik — klik kanan = hapus titik terakhir, Esc = selesai'
+  return drawHintText.value
+})
+
+const hintMetrics = computed(() => {
+  if (measureActive.value) {
+    const n = measurePoints.value.length
+    if (!n) return ''
+    if (n === 1) return '1 titik · klik titik berikutnya'
+    return `${n} titik · total ${formatDistance(measureTotal.value)}`
+  }
+  return drawMetricsText.value
+})
+
+function measureIcon(text, extra = '') {
+  return L.divIcon({
+    className: '',
+    html: `<div class="map-measure-label ${extra}">${escapeHtml(text)}</div>`,
+    iconSize: [0, 0],
+    iconAnchor: [0, 0]
+  })
+}
+
+function clearMeasureLayer() {
+  if (measureLayer && map) map.removeLayer(measureLayer)
+  measureLayer = null
+}
+
+function midpoint(a, b) {
+  return [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2]
+}
+
+function renderMeasure() {
+  if (!map) return
+  clearMeasureLayer()
+  const pts = measurePoints.value
+  const hover = measureHover.value
+  const group = L.layerGroup()
+  const shape = hover ? [...pts, hover] : pts
+
+  if (shape.length >= 2) {
+    group.addLayer(
+      L.polyline(shape, {
+        color: '#f59e0b',
+        weight: 3,
+        opacity: 0.95,
+        dashArray: hover ? '4 6' : null
+      })
+    )
+  }
+
+  pts.forEach((p, i) => {
+    group.addLayer(
+      L.circleMarker([p.lat, p.lng], {
+        radius: i === 0 ? 6 : 4.5,
+        color: '#fff',
+        weight: 2,
+        fillColor: i === 0 ? '#22c55e' : '#f59e0b',
+        fillOpacity: 1
+      })
+    )
+    if (i === 0) return
+    const [mlat, mlng] = midpoint(pts[i - 1], p)
+    group.addLayer(
+      L.marker([mlat, mlng], {
+        icon: measureIcon(formatDistance(haversine(pts[i - 1], p))),
+        interactive: false,
+        zIndexOffset: 1200
+      })
+    )
+  })
+
+  if (hover && pts.length) {
+    const last = pts[pts.length - 1]
+    const [mlat, mlng] = midpoint(last, hover)
+    group.addLayer(
+      L.marker([mlat, mlng], {
+        icon: measureIcon(formatDistance(haversine(last, hover)), 'map-measure-label--live'),
+        interactive: false,
+        zIndexOffset: 1200
+      })
+    )
+  }
+
+  if (pts.length >= 2) {
+    const last = pts[pts.length - 1]
+    group.addLayer(
+      L.marker([last.lat, last.lng], {
+        icon: measureIcon(`Total ${formatDistance(measureTotal.value)}`, 'map-measure-label--total'),
+        interactive: false,
+        zIndexOffset: 1400
+      })
+    )
+  }
+
+  measureLayer = group
+  if (group.getLayers().length) group.addTo(map)
+}
+
+function emitMeasure() {
+  emit('measure-change', {
+    active: measureActive.value,
+    count: measurePoints.value.length,
+    totalM: measureTotal.value,
+    segments: segmentLengths(measurePoints.value),
+    points: measurePoints.value.map((p) => ({ lat: p.lat, lng: p.lng }))
+  })
+}
+
+function startMeasure() {
+  if (!map) return
+  cancelDraw()
+  measureActive.value = true
+  measurePts.value = []
+  measureHover.value = null
+  if (map.doubleClickZoom) map.doubleClickZoom.disable()
+  renderMeasure()
+  emitMeasure()
+}
+
+function cancelMeasure(opts) {
+  const keepResult = opts && opts.keepResult
+  measureActive.value = false
+  measureHover.value = null
+  if (map && map.doubleClickZoom) map.doubleClickZoom.enable()
+  if (keepResult) renderMeasure()
+  else {
+    measurePts.value = []
+    clearMeasureLayer()
+  }
+  emitMeasure()
+}
+
+function resetMeasure() {
+  measurePts.value = []
+  measureHover.value = null
+  renderMeasure()
+  emitMeasure()
+}
+
+function undoMeasurePoint() {
+  if (!measurePts.value.length) return
+  measurePts.value = measurePts.value.slice(0, -1)
+  renderMeasure()
+  emitMeasure()
+}
+
+function cancelActiveTool() {
+  if (measureActive.value) cancelMeasure({ keepResult: true })
+  else cancelDraw()
+}
 
 const STATUS_COLORS = {
   ONLINE: '#22c55e',
@@ -192,6 +377,10 @@ function featurePopup(f) {
     ? `<button class="map-popup__btn" onclick="window.__fmFeature(${f.id})">Kelola Fitur</button>`
     : ''
   const typeLabel = { point: 'Titik', line: 'Jalur', polygon: 'Area' }[f.feature_type] || 'Fitur'
+  const metrics = metricsSummary(f.geometry) || []
+  const metricRows = metrics
+    .map((r) => `<tr><td>${escapeHtml(r.label)}</td><td>${escapeHtml(r.value)}</td></tr>`)
+    .join('')
   return `
     <div class="map-popup">
       <div class="map-popup__head">
@@ -202,6 +391,7 @@ function featurePopup(f) {
       <table class="map-popup__table">
         <tr><td>Jenis</td><td>${typeLabel}</td></tr>
         <tr><td>Ikon</td><td>${escapeHtml(f.icon || 'dot')}</td></tr>
+        ${metricRows}
       </table>
       ${manageBtn}
     </div>`
@@ -256,8 +446,16 @@ function renderFeatures() {
         fillOpacity: 0.12
       }
     })
+    const tip = metricsSummary(f.geometry)
     layer.eachLayer((l) => {
       l.bindPopup(featurePopup(f), { maxWidth: 280, autoPanPadding: [30, 30], className: 'map-popup-shell' })
+      if (tip) {
+        l.bindTooltip(tip.map((r) => `${r.label} ${r.value}`).join(' · '), {
+          sticky: true,
+          direction: 'top',
+          className: 'map-feature-tip'
+        })
+      }
     })
     featureGroup.addLayer(layer)
   })
@@ -375,12 +573,25 @@ function updateDrawPreview() {
     fillOpacity: 1
   })
   group.addLayer(lastMark)
+  if (shape.length >= 2) {
+    group.addLayer(
+      L.marker([last[0], last[1]], {
+        icon: measureIcon(
+          `${formatDistance(pathLength(shape))}${drawMode.value === 'polygon' ? ` · ${formatArea(ringArea(shape))}` : ''}`,
+          'map-measure-label--total map-measure-label--rose'
+        ),
+        interactive: false,
+        zIndexOffset: 1400
+      })
+    )
+  }
   drawPreview = group
   if (map) group.addTo(map)
 }
 
 function startDraw(mode) {
   if (!map || drawMode.value === mode) return
+  if (measureActive.value) cancelMeasure()
   cancelDraw({ keepMode: false })
   if (mode !== 'line' && mode !== 'polygon' && mode !== 'point') return
   drawMode.value = mode
@@ -427,6 +638,13 @@ function finishDrawGuarded() {
 
 function onMapClick(e) {
   if (Date.now() < suppressClicksUntil) return
+  if (measureActive.value) {
+    measurePts.value = [...measurePts.value, { lat: e.latlng.lat, lng: e.latlng.lng }]
+    measureHover.value = null
+    renderMeasure()
+    emitMeasure()
+    return
+  }
   if (drawMode.value === 'point') {
     drawVerts.length = 0
     emit('draw-complete', { type: 'point', latlng: { lat: e.latlng.lat, lng: e.latlng.lng } })
@@ -443,7 +661,30 @@ function onMapClick(e) {
   emit('map-click', { lat: e.latlng.lat, lng: e.latlng.lng })
 }
 
+function onMapMouseMove(e) {
+  if (!measureActive.value) return
+  const next = { lat: e.latlng.lat, lng: e.latlng.lng }
+  const hover = measureHover.value
+  if (hover && hover.lat === next.lat && hover.lng === next.lng) return
+  measureHover.value = next
+  if (measureRaf) return
+  measureRaf = requestAnimationFrame(() => {
+    measureRaf = 0
+    renderMeasure()
+  })
+}
+
+function onMapMouseOut() {
+  if (!measureActive.value || !measureHover.value) return
+  measureHover.value = null
+  renderMeasure()
+}
+
 function onMapDblClick(e) {
+  if (measureActive.value) {
+    if (e && e.originalEvent) e.originalEvent.preventDefault()
+    return
+  }
   if (drawMode.value === 'line' || drawMode.value === 'polygon') {
     if (e && e.originalEvent) e.originalEvent.preventDefault()
     finishDrawGuarded()
@@ -451,6 +692,11 @@ function onMapDblClick(e) {
 }
 
 function onMapContextMenu(e) {
+  if (measureActive.value) {
+    e.originalEvent.preventDefault()
+    undoMeasurePoint()
+    return
+  }
   if (drawMode.value === 'line' || drawMode.value === 'polygon') {
     e.originalEvent.preventDefault()
     finishDrawGuarded()
@@ -458,7 +704,9 @@ function onMapContextMenu(e) {
 }
 
 function onDrawKeydown(e) {
-  if (e.key === 'Escape' && drawMode.value) cancelDraw()
+  if (e.key !== 'Escape') return
+  if (drawMode.value) cancelDraw()
+  else if (measureActive.value) cancelMeasure({ keepResult: true })
 }
 
 // ---------- Ikon lokasi saya ----------
@@ -726,6 +974,8 @@ onMounted(() => {
   map.on('click', onMapClick)
   map.on('dblclick', onMapDblClick)
   map.on('contextmenu', onMapContextMenu)
+  map.on('mousemove', onMapMouseMove)
+  map.on('mouseout', onMapMouseOut)
   window.addEventListener('keydown', onDrawKeydown)
   rebuildMarkers()
   renderDraft()
@@ -763,17 +1013,25 @@ onUnmounted(() => {
     window.__fmShare = prevShareHandler
   }
   window.removeEventListener('keydown', onDrawKeydown)
+  if (measureRaf) {
+    cancelAnimationFrame(measureRaf)
+    measureRaf = 0
+  }
   cancelDraw()
+  cancelMeasure()
   if (map) {
     map.off('click', onMapClick)
     map.off('dblclick', onMapDblClick)
     map.off('contextmenu', onMapContextMenu)
+    map.off('mousemove', onMapMouseMove)
+    map.off('mouseout', onMapMouseOut)
     map.remove()
     map = null
     markers = null
     draftMarker = null
     areaMarker = null
     selfMarker = null
+    measureLayer = null
     kmzMeta.value = null
     markerMap.clear()
     featureById.clear()
@@ -807,7 +1065,17 @@ defineExpose({
   startDraw,
   cancelDraw,
   finishDrawNow: finishDrawGuarded,
-  refreshFeatures: loadFeatures
+  refreshFeatures: loadFeatures,
+  startMeasure,
+  cancelMeasure,
+  resetMeasure,
+  measureSnapshot: () => ({
+    active: measureActive.value,
+    count: measurePoints.value.length,
+    totalM: measureTotal.value,
+    segments: segmentLengths(measurePoints.value),
+    points: measurePoints.value.map((p) => ({ lat: p.lat, lng: p.lng }))
+  })
 })
 </script>
 
@@ -818,7 +1086,7 @@ defineExpose({
       class="monitor-map"
       :class="{
         'monitor-map--clickable': clickToAdd,
-        'monitor-map--drawing': !!drawMode
+        'monitor-map--drawing': !!drawMode || measureActive
       }"
     ></div>
     <input
@@ -831,9 +1099,28 @@ defineExpose({
     <div v-if="kmzMeta" class="kmz-badge">
       <span>{{ kmzMeta.name }} · {{ kmzMeta.count }} fitur tersimpan di database</span>
     </div>
-    <div v-if="drawMode" class="map-draw-hint">
-      <span>{{ drawHintText }} · Esc = batal</span>
-      <button class="map-draw-hint__cancel" type="button" @click="cancelDraw()">Batal</button>
+    <div v-if="drawMode || measureActive" class="map-draw-hint">
+      <span>{{ hintText }}</span>
+      <span v-if="hintMetrics" class="map-draw-hint__metric">{{ hintMetrics }}</span>
+      <template v-if="measureActive">
+        <button
+          v-if="measurePoints.length"
+          type="button"
+          class="map-draw-hint__act"
+          @click="undoMeasurePoint"
+        >
+          Hapus titik
+        </button>
+        <button
+          v-if="measurePoints.length"
+          type="button"
+          class="map-draw-hint__act"
+          @click="resetMeasure"
+        >
+          Reset
+        </button>
+      </template>
+      <button class="map-draw-hint__cancel" type="button" @click="cancelActiveTool">Batal</button>
     </div>
   </div>
 </template>

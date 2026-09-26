@@ -7,6 +7,7 @@ import { useMonitorStore } from '../stores/monitor'
 import { useAreaSearch } from '../composables/useAreaSearch'
 import { customerIconSvg, statusColor } from '../services/customerIcons'
 import { FEATURE_ICONS, FEATURE_COLORS } from '../services/featureIcons'
+import { formatDistance } from '../services/geo'
 import { mapsUrl, waShareUrl, downFor } from '../services/share'
 
 const router = useRouter()
@@ -31,6 +32,53 @@ const showFeatureModal = ref(false)
 const featureForm = ref({ name: '', icon: 'dot', color: '#3b82f6', description: '' })
 const featureSaving = ref(false)
 const featureError = ref('')
+
+const measureTool = ref(false)
+const measure = ref({ active: false, count: 0, totalM: 0, segments: [], points: [] })
+
+function onMeasureChange(payload) {
+  measure.value = payload || { active: false, count: 0, totalM: 0, segments: [], points: [] }
+  measureTool.value = !!measure.value.active
+}
+
+function toggleMeasure() {
+  if (measureTool.value) {
+    measureTool.value = false
+    mapView.value?.cancelMeasure({ keepResult: true })
+    return
+  }
+  drawTool.value = ''
+  measureTool.value = true
+  drawOpen.value = true
+  mapView.value?.startMeasure()
+}
+
+function clearMeasure() {
+  mapView.value?.resetMeasure()
+  measure.value = { active: false, count: 0, totalM: 0, segments: [], points: [] }
+}
+
+function saveMeasureAsRoute() {
+  const pts = measure.value.points
+  if (!pts || pts.length < 2) return
+  const coords = pts.map((p) => [p.lng, p.lat])
+  const name = `Jalur ${formatDistance(measure.value.totalM)}`
+  measureTool.value = false
+  mapView.value?.cancelMeasure()
+  featureDraft.value = {
+    isPoint: false,
+    geometry: { type: 'LineString', coordinates: coords }
+  }
+  featureEditId.value = null
+  featureForm.value = {
+    name,
+    icon: 'dot',
+    color: FEATURE_COLORS[0],
+    description: ''
+  }
+  featureError.value = ''
+  showFeatureModal.value = true
+}
 
 function onFeatureManage(feature) {
   featureEditId.value = feature.id
@@ -106,7 +154,9 @@ function toggleDrawTools() {
 
 function closeDrawTools() {
   drawTool.value = ''
+  measureTool.value = false
   if (mapView.value) mapView.value.cancelDraw()
+  mapView.value?.cancelMeasure({ keepResult: true })
   drawOpen.value = false
   mapWide.value = false
 }
@@ -116,7 +166,9 @@ function toggleDraw(mode) {
     closeDrawTools()
     return
   }
+  if (measureTool.value) mapView.value?.cancelMeasure()
   if (drawTool.value) mapView.value?.cancelDraw()
+  measureTool.value = false
   drawOpen.value = true
   drawTool.value = mode
   mapWide.value = true
@@ -324,6 +376,7 @@ onBeforeUnmount(() => {
           @open-detail="openDetail"
           @feature-manage="onFeatureManage"
           @draw-complete="onDrawComplete"
+          @measure-change="onMeasureChange"
         />
 
         <div class="map-draw">
@@ -366,6 +419,15 @@ onBeforeUnmount(() => {
               Titik Info
             </button>
             <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              :class="{ 'map-tools__active': measureTool }"
+              @click="toggleMeasure"
+            >
+              <svg class="icon icon--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4"/><circle cx="12" cy="12" r="9"/></svg>
+              Cek Jarak
+            </button>
+            <button
               v-if="drawTool && drawTool !== 'point'"
               type="button"
               class="btn btn--primary btn--sm"
@@ -380,6 +442,41 @@ onBeforeUnmount(() => {
               @click="toggleDraw(drawTool)"
             >
               Batal gambar
+            </button>
+          </div>
+        </div>
+
+        <div v-if="measure.count >= 1" class="measure-panel">
+          <div class="measure-panel__head">
+            <span>Hasil Cek Jarak</span>
+            <button type="button" class="measure-panel__close" title="Tutup" @click="clearMeasure">✕</button>
+          </div>
+          <div class="measure-panel__total">
+            <strong>{{ formatDistance(measure.totalM) }}</strong>
+            <span>{{ measure.count }} titik</span>
+          </div>
+          <ul v-if="measure.segments.length > 1" class="measure-panel__list">
+            <li v-for="(seg, i) in measure.segments" :key="i">
+              <span>Segmen {{ i + 1 }}</span>
+              <strong>{{ formatDistance(seg) }}</strong>
+            </li>
+          </ul>
+          <div class="measure-panel__actions">
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              :disabled="measureTool"
+              @click="toggleMeasure"
+            >
+              {{ measureTool ? 'Mode ukur aktif' : 'Lanjut ukur' }}
+            </button>
+            <button
+              type="button"
+              class="btn btn--primary btn--sm"
+              :disabled="measure.count < 2"
+              @click="saveMeasureAsRoute"
+            >
+              Simpan jadi Jalur
             </button>
           </div>
         </div>
