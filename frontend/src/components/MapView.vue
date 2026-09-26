@@ -103,11 +103,12 @@ const hintMetrics = computed(() => {
   return drawMetricsText.value
 })
 
-function measureIcon(text, extra = '') {
+function measureIcon(text, extra = '', prefix = '') {
+  const head = prefix ? `<span class="map-measure-label__key">${escapeHtml(prefix)}</span>` : ''
   return L.divIcon({
-    className: '',
-    html: `<div class="map-measure-label ${extra}">${escapeHtml(text)}</div>`,
-    iconSize: [0, 0],
+    className: 'map-measure-wrap',
+    html: `<div class="map-measure-label ${extra}">${head}<span>${escapeHtml(text)}</span></div>`,
+    iconSize: null,
     iconAnchor: [0, 0]
   })
 }
@@ -177,7 +178,7 @@ function renderMeasure() {
     const last = pts[pts.length - 1]
     group.addLayer(
       L.marker([last.lat, last.lng], {
-        icon: measureIcon(`Total ${formatDistance(measureTotal.value)}`, 'map-measure-label--total'),
+        icon: measureIcon(formatDistance(measureTotal.value), 'map-measure-label--total', 'Total'),
         interactive: false,
         zIndexOffset: 1400
       })
@@ -574,12 +575,13 @@ function updateDrawPreview() {
   })
   group.addLayer(lastMark)
   if (shape.length >= 2) {
+    const text =
+      drawMode.value === 'polygon'
+        ? `${formatDistance(pathLength(shape))} · ${formatArea(ringArea(shape))}`
+        : formatDistance(pathLength(shape))
     group.addLayer(
       L.marker([last[0], last[1]], {
-        icon: measureIcon(
-          `${formatDistance(pathLength(shape))}${drawMode.value === 'polygon' ? ` · ${formatArea(ringArea(shape))}` : ''}`,
-          'map-measure-label--total map-measure-label--rose'
-        ),
+        icon: measureIcon(text, 'map-measure-label--total map-measure-label--rose', 'Total'),
         interactive: false,
         zIndexOffset: 1400
       })
