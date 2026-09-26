@@ -1,0 +1,1 @@
+import{o as e,c as n,a as t,t as o,p as l}from"./index-Ckqj5mbC.js";const u={__name:"StatusBadge",props:{status:{type:String,default:"OFFLINE"}},setup(a){return(r,s)=>(e(),n("span",{class:l(["badge",`badge--${(a.status||"OFFLINE").toLowerCase()}`])},[s[0]||(s[0]=t("span",{class:"badge__dot"},null,-1)),t("span",null,o(a.status),1)],2))}};export{u as _};

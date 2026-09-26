@@ -83,13 +83,18 @@ const measureActive = ref(false)
 const measurePts = ref([])
 const measureHover = ref(null)
 let measureLayer = null
+let measureLineLayer = null
+let measureVertexLayer = null
+let draggingVertex = false
 let measureRaf = 0
 
-const measurePoints = computed(() => dedupePoints(measurePts.value))
+const measurePoints = computed(() => measurePts.value)
 const measureTotal = computed(() => pathLength(measurePoints.value))
 
 const hintText = computed(() => {
-  if (measureActive.value) return 'Klik peta untuk menandai titik — klik kanan = hapus titik terakhir, Esc = selesai'
+  if (measureActive.value) {
+    return 'Klik peta = tambah titik · seret titik = rapikan · klik 2x / klik kanan = hapus · Esc = selesai'
+  }
   return drawHintText.value
 })
 
@@ -98,40 +103,81 @@ const hintMetrics = computed(() => {
     const n = measurePoints.value.length
     if (!n) return ''
     if (n === 1) return '1 titik · klik titik berikutnya'
-    return `${n} titik · total ${formatDistance(measureTotal.value)}`
+    return `${n} titik · ${formatDistance(measureTotal.value)}`
   }
   return drawMetricsText.value
 })
 
-function measureIcon(text, extra = '', prefix = '') {
-  const head = prefix ? `<span class="map-measure-label__key">${escapeHtml(prefix)}</span>` : ''
+function measureIcon(text, extra = '') {
   return L.divIcon({
     className: 'map-measure-wrap',
-    html: `<div class="map-measure-label ${extra}">${head}<span>${escapeHtml(text)}</span></div>`,
+    html: `<div class="map-measure-label ${extra}">${escapeHtml(text)}</div>`,
     iconSize: null,
     iconAnchor: [0, 0]
+  })
+}
+
+function measureVertexIcon(index) {
+  return L.divIcon({
+    className: `map-measure-vertex${index === 0 ? ' map-measure-vertex--start' : ''}`,
+    html: '<span class="map-measure-vertex__dot"></span>',
+    iconSize: [18, 18],
+    iconAnchor: [9, 9]
   })
 }
 
 function clearMeasureLayer() {
   if (measureLayer && map) map.removeLayer(measureLayer)
   measureLayer = null
+  measureLineLayer = null
+  measureVertexLayer = null
 }
 
 function midpoint(a, b) {
   return [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2]
 }
 
-function renderMeasure() {
+function buildMeasureVertices(pts) {
+  const group = L.layerGroup()
+  pts.forEach((p, i) => {
+    const mk = L.marker([p.lat, p.lng], {
+      icon: measureVertexIcon(i),
+      draggable: true,
+      autoPan: true,
+      keyboard: false,
+      bubblingMouseEvents: false,
+      zIndexOffset: 1500
+    })
+    mk.on('dragstart', () => {
+      if (mk._icon) L.DomUtil.addClass(mk._icon, 'map-measure-vertex--dragging')
+    })
+    mk.on('drag', () => onVertexDrag(i, mk.getLatLng()))
+    mk.on('dragend', () => {
+      if (mk._icon) L.DomUtil.removeClass(mk._icon, 'map-measure-vertex--dragging')
+      onVertexDragEnd()
+    })
+    mk.on('dblclick', () => removeMeasurePoint(i))
+    group.addLayer(mk)
+  })
+  return group
+}
+
+function renderMeasure(opts) {
   if (!map) return
-  clearMeasureLayer()
+  const keepVertices = opts && opts.keepVertices
   const pts = measurePoints.value
   const hover = measureHover.value
-  const group = L.layerGroup()
+
+  if (!measureLayer) measureLayer = L.layerGroup().addTo(map)
+  if (measureLineLayer) measureLayer.removeLayer(measureLineLayer)
+  measureLineLayer = L.layerGroup()
+  measureLayer.addLayer(measureLineLayer)
+  const line = measureLineLayer
+
   const shape = hover ? [...pts, hover] : pts
 
   if (shape.length >= 2) {
-    group.addLayer(
+    line.addLayer(
       L.polyline(shape, {
         color: '#f59e0b',
         weight: 3,
@@ -141,31 +187,23 @@ function renderMeasure() {
     )
   }
 
-  pts.forEach((p, i) => {
-    group.addLayer(
-      L.circleMarker([p.lat, p.lng], {
-        radius: i === 0 ? 6 : 4.5,
-        color: '#fff',
-        weight: 2,
-        fillColor: i === 0 ? '#22c55e' : '#f59e0b',
-        fillOpacity: 1
-      })
-    )
-    if (i === 0) return
-    const [mlat, mlng] = midpoint(pts[i - 1], p)
-    group.addLayer(
+  for (let i = 1; i < pts.length; i++) {
+    const seg = haversine(pts[i - 1], pts[i])
+    if (seg < 0.5) continue
+    const [mlat, mlng] = midpoint(pts[i - 1], pts[i])
+    line.addLayer(
       L.marker([mlat, mlng], {
-        icon: measureIcon(formatDistance(haversine(pts[i - 1], p))),
+        icon: measureIcon(formatDistance(seg)),
         interactive: false,
         zIndexOffset: 1200
       })
     )
-  })
+  }
 
   if (hover && pts.length) {
     const last = pts[pts.length - 1]
     const [mlat, mlng] = midpoint(last, hover)
-    group.addLayer(
+    line.addLayer(
       L.marker([mlat, mlng], {
         icon: measureIcon(formatDistance(haversine(last, hover)), 'map-measure-label--live'),
         interactive: false,
@@ -176,17 +214,47 @@ function renderMeasure() {
 
   if (pts.length >= 2) {
     const last = pts[pts.length - 1]
-    group.addLayer(
+    line.addLayer(
       L.marker([last.lat, last.lng], {
-        icon: measureIcon(formatDistance(measureTotal.value), 'map-measure-label--total', 'Total'),
+        icon: measureIcon(formatDistance(measureTotal.value), 'map-measure-label--total'),
         interactive: false,
         zIndexOffset: 1400
       })
     )
   }
 
-  measureLayer = group
-  if (group.getLayers().length) group.addTo(map)
+  if (keepVertices) return
+  if (measureVertexLayer) measureLayer.removeLayer(measureVertexLayer)
+  measureVertexLayer = buildMeasureVertices(pts)
+  measureLayer.addLayer(measureVertexLayer)
+}
+
+function onVertexDrag(index, latlng) {
+  draggingVertex = true
+  measureHover.value = null
+  const next = measurePts.value.slice()
+  next[index] = { lat: latlng.lat, lng: latlng.lng }
+  measurePts.value = next
+  if (measureRaf) return
+  measureRaf = requestAnimationFrame(() => {
+    measureRaf = 0
+    renderMeasure({ keepVertices: true })
+  })
+}
+
+function onVertexDragEnd() {
+  draggingVertex = false
+  suppressClicksUntil = Date.now() + 300
+  emitMeasure()
+}
+
+function removeMeasurePoint(index) {
+  if (index < 0 || index >= measurePts.value.length) return
+  const next = measurePts.value.slice()
+  next.splice(index, 1)
+  measurePts.value = next
+  renderMeasure()
+  emitMeasure()
 }
 
 function emitMeasure() {
@@ -581,7 +649,7 @@ function updateDrawPreview() {
         : formatDistance(pathLength(shape))
     group.addLayer(
       L.marker([last[0], last[1]], {
-        icon: measureIcon(text, 'map-measure-label--total map-measure-label--rose', 'Total'),
+        icon: measureIcon(text, 'map-measure-label--total map-measure-label--rose'),
         interactive: false,
         zIndexOffset: 1400
       })
@@ -641,10 +709,17 @@ function finishDrawGuarded() {
 function onMapClick(e) {
   if (Date.now() < suppressClicksUntil) return
   if (measureActive.value) {
-    measurePts.value = [...measurePts.value, { lat: e.latlng.lat, lng: e.latlng.lng }]
+    if (draggingVertex) return
+    const src = e.originalEvent && e.originalEvent.target
+    if (src && src.closest && src.closest('.map-measure-vertex')) return
+    const next = { lat: e.latlng.lat, lng: e.latlng.lng }
+    const last = measurePts.value[measurePts.value.length - 1]
+    if (!last || last.lat !== next.lat || last.lng !== next.lng) {
+      measurePts.value = [...measurePts.value, next]
+      emitMeasure()
+    }
     measureHover.value = null
     renderMeasure()
-    emitMeasure()
     return
   }
   if (drawMode.value === 'point') {
@@ -664,7 +739,7 @@ function onMapClick(e) {
 }
 
 function onMapMouseMove(e) {
-  if (!measureActive.value) return
+  if (!measureActive.value || draggingVertex) return
   const next = { lat: e.latlng.lat, lng: e.latlng.lng }
   const hover = measureHover.value
   if (hover && hover.lat === next.lat && hover.lng === next.lng) return
@@ -672,14 +747,14 @@ function onMapMouseMove(e) {
   if (measureRaf) return
   measureRaf = requestAnimationFrame(() => {
     measureRaf = 0
-    renderMeasure()
+    renderMeasure({ keepVertices: true })
   })
 }
 
 function onMapMouseOut() {
-  if (!measureActive.value || !measureHover.value) return
+  if (!measureActive.value || draggingVertex || !measureHover.value) return
   measureHover.value = null
-  renderMeasure()
+  renderMeasure({ keepVertices: true })
 }
 
 function onMapDblClick(e) {
