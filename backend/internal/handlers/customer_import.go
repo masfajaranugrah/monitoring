@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -157,15 +158,16 @@ func ImportJobStatus(c *gin.Context) {
 
 // parsedRow adalah satu baris data pelanggan hasil bacaan Excel.
 type parsedRow struct {
-	idx      int
-	name     string
-	ip       string
-	maps     string
-	code     string
-	vpn      string
-	lat      float64
-	lng      float64
-	hasCoord bool
+	idx        int
+	name       string
+	ip         string
+	maps       string
+	code       string
+	vpn        string
+	lat        float64
+	lng        float64
+	hasCoord   bool
+	coordError string // alasan koordinat tidak ditemukan (untuk pesan hasil)
 }
 
 // runCustomerImportJob memproses file impor di goroutine latar belakang:
@@ -216,7 +218,7 @@ func buildParsedRows(colIdx map[string]int, rows [][]string) []*parsedRow {
 			return strings.TrimSpace(row[idx])
 		}
 		name := cell(colName)
-		ip := cell(colIP)
+		ip := normalizeIP(cell(colIP))
 		maps := cell(colMaps)
 		if name == "" && ip == "" && maps == "" {
 			continue
@@ -248,7 +250,7 @@ func resolveCoordsParallel(ctx context.Context, rows []*parsedRow) {
 	var cacheMu sync.Mutex
 	cache := map[string][2]float64{}
 	var failMu sync.Mutex
-	failed := map[string]struct{}{}
+	failed := map[string]string{}
 	var busyMu sync.Mutex
 	busy := map[string]struct{}{}
 
@@ -257,7 +259,11 @@ func resolveCoordsParallel(ctx context.Context, rows []*parsedRow) {
 	worker := func() {
 		defer wg.Done()
 		for pr := range work {
-			if pr.hasCoord || pr.maps == "" {
+			if pr.hasCoord {
+				continue
+			}
+			if pr.maps == "" {
+				pr.coordError = "kolom Link Google Maps kosong"
 				continue
 			}
 			key := pr.maps
@@ -270,9 +276,10 @@ func resolveCoordsParallel(ctx context.Context, rows []*parsedRow) {
 					break
 				}
 				failMu.Lock()
-				_, bad := failed[key]
+				reason, bad := failed[key]
 				failMu.Unlock()
 				if bad {
+					pr.coordError = reason
 					break
 				}
 				busyMu.Lock()
@@ -280,6 +287,7 @@ func resolveCoordsParallel(ctx context.Context, rows []*parsedRow) {
 					busyMu.Unlock()
 					select {
 					case <-ctx.Done():
+						pr.coordError = "resolusi link dihentikan karena batas waktu impor"
 						return
 					case <-time.After(40 * time.Millisecond):
 					}
@@ -288,7 +296,7 @@ func resolveCoordsParallel(ctx context.Context, rows []*parsedRow) {
 				busy[key] = struct{}{}
 				busyMu.Unlock()
 
-				a, b, ok2 := resolveMapsLinkCoord(ctx, key)
+				a, b, ok2, reason := resolveMapsLinkCoordWithRetry(ctx, key)
 				cacheMu.Lock()
 				if ok2 {
 					cache[key] = [2]float64{a, b}
@@ -296,7 +304,7 @@ func resolveCoordsParallel(ctx context.Context, rows []*parsedRow) {
 				cacheMu.Unlock()
 				failMu.Lock()
 				if !ok2 {
-					failed[key] = struct{}{}
+					failed[key] = reason
 				}
 				failMu.Unlock()
 				busyMu.Lock()
@@ -305,6 +313,9 @@ func resolveCoordsParallel(ctx context.Context, rows []*parsedRow) {
 
 				if ok2 {
 					pr.lat, pr.lng, pr.hasCoord = a, b, true
+				} else {
+					pr.coordError = reason
+					log.Printf("[customer] impor: link %q gagal dibaca koordinat: %s", key, reason)
 				}
 				break
 			}
@@ -327,6 +338,42 @@ func resolveCoordsParallel(ctx context.Context, rows []*parsedRow) {
 	wg.Wait()
 }
 
+// resolveMapsLinkCoordWithRetry mencoba resolve link beberapa kali. Kegagalan
+// jaringan sementara (timeout, reset koneksi, DNS) sangat umum saat membuka
+// banyak link Google Maps berurutan, sehingga satu percobaan terlalu rapuh.
+func resolveMapsLinkCoordWithRetry(ctx context.Context, maps string) (float64, float64, bool, string) {
+	const attempts = 3
+	var (
+		lat, lng float64
+		reason   string
+	)
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			if !sleepCtx(ctx, time.Duration(i)*time.Second) {
+				break
+			}
+		}
+		var ok bool
+		lat, lng, ok, reason = resolveMapsLinkCoordReason(ctx, maps)
+		if ok {
+			return lat, lng, true, ""
+		}
+		// Kegagalan format/geocoding tidak akan berubah dengan mengulang.
+		if !isTransientCoordFailure(reason) {
+			break
+		}
+	}
+	return 0, 0, false, reason
+}
+
+// isTransientCoordFailure menandai kegagalan yang layak dicoba ulang.
+func isTransientCoordFailure(reason string) bool {
+	return strings.Contains(reason, "tidak bisa dibuka") ||
+		strings.Contains(reason, "tanpa koordinat") ||
+		strings.Contains(reason, "timeout") ||
+		strings.Contains(reason, "koneksi")
+}
+
 type importResult struct {
 	created   int
 	updated   int
@@ -344,32 +391,39 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 	}
 	defer tx.Rollback(ctx)
 
-	rowErr := func(pr *parsedRow, msg string) string {
-		return fmt.Sprintf("baris %d: %s", pr.idx+1, msg)
+	// groups mengumpulkan semua alasan dilewati (bukan hanya yang pertama),
+	// supaya pengguna bisa memperbaiki file Excel-nya sekaligus.
+	var order []string
+	groups := map[string]*skipReason{}
+	skipWith := func(pr *parsedRow, key, msg string) {
+		skipped++
+		g, ok := groups[key]
+		if !ok {
+			g = &skipReason{label: msg}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.count++
+		if g.sample == "" {
+			g.sample = fmt.Sprintf("baris %d", pr.idx+1)
+		}
 	}
 
 	for _, pr := range rows {
 		if pr.name == "" {
-			skipped++
-			if firstSkip == "" {
-				firstSkip = rowErr(pr, "nama kosong")
-			}
+			skipWith(pr, "nama", "nama pelanggan kosong")
 			continue
 		}
 		if !validateIP(pr.ip) {
-			skipped++
-			if firstSkip == "" {
-				firstSkip = rowErr(pr, "ip tidak valid ("+pr.ip+")")
-			}
+			skipWith(pr, "ip", fmt.Sprintf("IP tidak valid (%q) — gunakan titik, contoh 10.111.210.57", pr.ip))
 			continue
 		}
 		if !pr.hasCoord {
-			skipped++
-			if firstSkip == "" {
-				firstSkip = rowErr(pr, "koordinat tidak ditemukan di link Google Maps ("+pr.maps+"). "+
-					"Format link yang didukung: maps.google.com/?q=LAT,LNG, google.com/maps/@LAT,LNG,"+
-					" /place/LAT,LNG/data=..., link pendek maps.app.goo.gl / goo.gl/maps, atau alamat / plus code.")
+			why := pr.coordError
+			if why == "" {
+				why = "koordinat tidak ditemukan"
 			}
+			skipWith(pr, "coord:"+why, "koordinat tidak ditemukan: "+why)
 			continue
 		}
 
@@ -380,10 +434,7 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 
 		vpnID, vpnErr := resolveVPNID(ctx, pr.vpn)
 		if vpnErr != nil {
-			skipped++
-			if firstSkip == "" {
-				firstSkip = rowErr(pr, "vpn tidak ditemukan: "+pr.vpn)
-			}
+			skipWith(pr, "vpn", "VPN tidak ditemukan: "+pr.vpn)
 			continue
 		}
 
@@ -397,7 +448,8 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 			`SELECT EXISTS(SELECT 1 FROM customers WHERE customer_code = $1)`, code).Scan(&exists); qErr != nil {
 			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT import_customer")
 			_, _ = tx.Exec(ctx, "RELEASE SAVEPOINT import_customer")
-			skipped++
+			skipWith(pr, "db", "cek kode pelanggan gagal: "+qErr.Error())
+			log.Printf("[customer] import cek kode baris %d: %v", pr.idx+1, qErr)
 			continue
 		}
 		if exists {
@@ -409,10 +461,7 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 			if execErr != nil {
 				_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT import_customer")
 				_, _ = tx.Exec(ctx, "RELEASE SAVEPOINT import_customer")
-				skipped++
-				if firstSkip == "" {
-					firstSkip = rowErr(pr, execErr.Error())
-				}
+				skipWith(pr, "db", "gagal memperbarui: "+execErr.Error())
 				log.Printf("[customer] import update gagal baris %d: %v", pr.idx+1, execErr)
 				continue
 			}
@@ -431,10 +480,7 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 		if execErr != nil {
 			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT import_customer")
 			_, _ = tx.Exec(ctx, "RELEASE SAVEPOINT import_customer")
-			skipped++
-			if firstSkip == "" {
-				firstSkip = rowErr(pr, execErr.Error())
-			}
+			skipWith(pr, "db", "gagal menyimpan: "+execErr.Error())
 			log.Printf("[customer] import lewati baris %d (%s): %v", pr.idx+1, pr.name, execErr)
 			continue
 		}
@@ -445,7 +491,44 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, 0, "", errors.New("gagal menyimpan impor: " + err.Error())
 	}
-	return created, updated, skipped, firstSkip, nil
+	if skipped > 0 {
+		log.Printf("[customer] impor: %d baris dilewati — %s", skipped, summarizeSkipReasons(order, groups))
+	}
+	return created, updated, skipped, summarizeSkipReasons(order, groups), nil
+}
+
+// skipReason mengelompokkan baris yang dilewati karena alasan yang sama.
+type skipReason struct {
+	label  string
+	count  int
+	sample string
+}
+
+// summarizeSkipReasons merangkum alasan baris yang dilewati beserta jumlahnya,
+// diurutkan dari yang paling sering terjadi.
+func summarizeSkipReasons(order []string, groups map[string]*skipReason) string {
+	if len(order) == 0 {
+		return ""
+	}
+	list := make([]skipReason, 0, len(order))
+	for _, key := range order {
+		list = append(list, *groups[key])
+	}
+	sort.SliceStable(list, func(i, j int) bool { return list[i].count > list[j].count })
+
+	const maxReasons = 4
+	var b strings.Builder
+	for i, e := range list {
+		if i >= maxReasons {
+			fmt.Fprintf(&b, "; %d alasan lain", len(list)-maxReasons)
+			break
+		}
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		fmt.Fprintf(&b, "%s (%d baris, contoh %s)", e.label, e.count, e.sample)
+	}
+	return b.String()
 }
 
 // finishImportJob menulis hasil pekerjaan ke penyimpanan status.

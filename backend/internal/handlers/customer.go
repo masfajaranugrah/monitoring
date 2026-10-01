@@ -62,9 +62,47 @@ func derefBool(p *bool) bool {
 	return p != nil && *p
 }
 
+// normalizeIP merapikan penulisan IP yang sering muncul di file Excel.
+// Stock data lama sering menulis koma sebagai pemisah ("10,111,210,103")
+// atau menyisipkan spasi/karakter non-printable. Nilai tersebut ditolak
+// net.ParseIP sehingga baris dilewati tanpa alasan yang jelas.
+func normalizeIP(ip string) string {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return ""
+	}
+	// Buang karakter tak tercetak (mis. \u00a0 hasil paste dari web).
+	var b strings.Builder
+	for _, r := range ip {
+		if r < 0x20 || r == 0x7f || r == 0x00a0 || r == 0x200b || r == 0xfeff {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	ip = b.String()
+	// Koma sebagai pemisah oktet → titik.
+	ip = strings.ReplaceAll(ip, ",", ".")
+	// Buang spasi di sekitar titik.
+	for strings.Contains(ip, " .") || strings.Contains(ip, ". ") ||
+		strings.HasPrefix(ip, ".") || strings.HasSuffix(ip, ".") ||
+		strings.Contains(ip, "..") {
+		ip = strings.ReplaceAll(ip, " .", ".")
+		ip = strings.ReplaceAll(ip, ". ", ".")
+		ip = strings.TrimPrefix(ip, ".")
+		ip = strings.TrimSuffix(ip, ".")
+		ip = strings.ReplaceAll(ip, "..", ".")
+	}
+	return strings.TrimSpace(ip)
+}
+
+// validateIP menerima IP baik bentuk kanonik maupun bentuk "mentah" dari
+// Excel (koma sebagai pemisah, spasi berlebih).
 func validateIP(ip string) bool {
-	parsed := net.ParseIP(ip)
-	return parsed != nil
+	ip = normalizeIP(ip)
+	if ip == "" {
+		return false
+	}
+	return net.ParseIP(ip) != nil
 }
 
 func validateCoord(lat, lng float64) bool {
@@ -241,6 +279,7 @@ func CreateCustomer(c *gin.Context) {
 		return
 	}
 
+	input.IPAddress = normalizeIP(input.IPAddress)
 	if !validateIP(input.IPAddress) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IP address"})
 		return
@@ -378,6 +417,7 @@ func UpdateCustomer(c *gin.Context) {
 		return
 	}
 
+	input.IPAddress = normalizeIP(input.IPAddress)
 	if !validateIP(input.IPAddress) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IP address"})
 		return

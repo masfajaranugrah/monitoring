@@ -5,6 +5,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -121,17 +123,17 @@ func TestGeocodePlace(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"lat":"-7.7275","lon":"110.6779"}]`))
+		_, _ = w.Write([]byte(`[{"lat":"-7.7275","lon":"110.6779","display_name":"Jetis, Cawas, Klaten, Jawa Tengah, Indonesia"}]`))
 	}))
 	defer srv.Close()
 	nominatimBase = srv.URL
 
-	lat, lng, ok := geocodePlace(context.Background(), "6PC2+3PH Bagas's Home, Cawas, Klaten")
+	lat, lng, ok := geocodePlace(context.Background(), "6PC2+3PH Bagas's Home, Jetis, Cawas, Klaten")
 	if !ok || lat != -7.7275 || lng != 110.6779 {
 		t.Fatalf("geocodePlace = (%v,%v,%v)", lat, lng, ok)
 	}
 	// Harus ter-cache: server dimatikan, tapi hasil tetap terkelola.
-	lat2, lng2, ok2 := geocodePlace(context.Background(), "6PC2+3PH Bagas's Home, Cawas, Klaten")
+	lat2, lng2, ok2 := geocodePlace(context.Background(), "6PC2+3PH Bagas's Home, Jetis, Cawas, Klaten")
 	if !ok2 || lat2 != lat || lng2 != lng {
 		t.Fatalf("geocodePlace cache = (%v,%v,%v)", lat2, lng2, ok2)
 	}
@@ -153,7 +155,7 @@ func TestResolveMapsLinkCoordQueryGeocode(t *testing.T) {
 	// Nominatim palsu.
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"lat":"-7.81","lon":"110.62"}]`))
+		_, _ = w.Write([]byte(`[{"lat":"-7.81","lon":"110.62","display_name":"Klaten, Jawa Tengah, Indonesia"}]`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -281,6 +283,170 @@ func TestResolveCoordsParallel(t *testing.T) {
 	}
 }
 
+func TestNormalizeIP(t *testing.T) {
+	cases := map[string]string{
+		"10.111.210.57":     "10.111.210.57",
+		"10,111,210,103":    "10.111.210.103",
+		"192,135,135,123":   "192.135.135.123",
+		" 10.111.210.57 ":   "10.111.210.57",
+		"10.111.210.57\n":   "10.111.210.57",
+		"10.111.210.57\r\n": "10.111.210.57",
+		"10, 111, 210, 57":  "10.111.210.57",
+		"":                  "",
+		"bukan ip":          "bukan ip",
+	}
+	for in, want := range cases {
+		if got := normalizeIP(in); got != want {
+			t.Fatalf("normalizeIP(%q) = %q want %q", in, got, want)
+		}
+	}
+	valid := []string{"10.111.210.57", "10,111,210,103", "192,135,135,123", " 10.111.210.57 "}
+	for _, in := range valid {
+		if !validateIP(in) {
+			t.Fatalf("validateIP(%q) harus true", in)
+		}
+	}
+	for _, in := range []string{"", "bukan ip", "10.111.210", "999.1.1.1", "10..111.210"} {
+		if validateIP(in) {
+			t.Fatalf("validateIP(%q) harus false", in)
+		}
+	}
+}
+
+// TestResolveMapsLinkCoordInterstitial memastikan link yang diarahkan ke halaman
+// consent/captcha Google tetap bisa diambil koordinatnya dari parameter continue.
+func TestResolveMapsLinkCoordInterstitial(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/short", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/consent?continue="+url.QueryEscape(
+			"/maps/place/-7.790561,110.719199/data=!3m1!4d110.719199"), http.StatusFound)
+	})
+	mux.HandleFunc("/consent", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/maps/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	lat, lng, ok, reason := resolveMapsLinkCoordReason(context.Background(), srv.URL+"/short")
+	if !ok {
+		t.Fatalf("interstitial gagal: %s", reason)
+	}
+	if lat != -7.790561 || lng != 110.719199 {
+		t.Fatalf("interstitial koordinat = (%v,%v)", lat, lng)
+	}
+}
+
+// TestResolveMapsLinkCoordFromHTML memastikan koordinat di dalam body HTML
+// terbaca ketika URL redirect tidak memuat koordinat.
+func TestResolveMapsLinkCoordFromHTML(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/short", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/places/Toko+Anda", http.StatusFound)
+	})
+	mux.HandleFunc("/places/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><script>window.APP_INITIALIZATION_STATE=
+			[[["!3d-7.7898654!4d110.7166475"]]]</script></html>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	lat, lng, ok, reason := resolveMapsLinkCoordReason(context.Background(), srv.URL+"/short")
+	if !ok {
+		t.Fatalf("ambil koordinat dari HTML gagal: %s", reason)
+	}
+	if lat != -7.7898654 || lng != 110.7166475 {
+		t.Fatalf("koordinat HTML = (%v,%v)", lat, lng)
+	}
+}
+
+// TestResolveMapsLinkCoordReasonNotBlank memastikan kegagalan selalu disertai
+// alasan yang bisa ditampilkan ke pengguna.
+func TestResolveMapsLinkCoordReasonNotBlank(t *testing.T) {
+	_, _, ok, reason := resolveMapsLinkCoordReason(context.Background(), "")
+	if ok || reason == "" {
+		t.Fatalf("link kosong harus gagal dengan alasan, ok=%v reason=%q", ok, reason)
+	}
+	_, _, ok, reason = resolveMapsLinkCoordReason(context.Background(), "abcdef")
+	if ok || reason == "" {
+		t.Fatalf("link tak dikenal harus gagal dengan alasan, ok=%v reason=%q", ok, reason)
+	}
+}
+
+// TestGeocodeRejectsUnrelatedResult memastikan teks yang tidak relevan tidak
+// dipetakan ke tempat acak di negara lain.
+func TestGeocodeRejectsUnrelatedResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Hasil nyata untuk kueri "abcdef": boundary stone diPrancis.
+		_, _ = w.Write([]byte(`[{"lat":"45.3132458","lon":"6.9912816",` +
+			`"display_name":"bess f 56 (abcdef), Bessans, Savoie, France"}]`))
+	}))
+	defer srv.Close()
+	old := nominatimBase
+	nominatimBase = srv.URL
+	defer func() { nominatimBase = old }()
+	geocodeCache.Lock()
+	geocodeCache.m = map[string][2]float64{}
+	geocodeCache.Unlock()
+
+	lat, lng, ok := geocodePlace(context.Background(), "abcdef")
+	if ok {
+		t.Fatalf("hasil tak relevan harus ditolak, dapat (%v,%v)", lat, lng)
+	}
+	// Alamat sebenarnya tetap diterima (memuat nama wilayah pada display_name).
+	lat, lng, ok = geocodePlace(context.Background(), "Rue du Repos, Bessans")
+	if !ok || lat == 0 {
+		t.Fatalf("hasil yang cocok harus diterima, ok=%v (%v,%v)", ok, lat, lng)
+	}
+}
+
+// TestLooksLikeAddressQuery memastikan teks non-alamat tidak dikirim ke
+// layanan geocoding.
+func TestLooksLikeAddressQuery(t *testing.T) {
+	shouldGeocode := []string{
+		"6PC2+3PH Bagas's Home, Jetis",
+		"Jetis, Cawas, Klaten",
+		"Jl. Merdeka No. 10, Yogyakarta",
+	}
+	for _, in := range shouldGeocode {
+		if !looksLikeAddressQuery(in) {
+			t.Fatalf("looksLikeAddressQuery(%q) harus true", in)
+		}
+	}
+	shouldSkip := []string{"", "abc", "abcdef", "rumah", "maps", "?"}
+	for _, in := range shouldSkip {
+		if looksLikeAddressQuery(in) {
+			t.Fatalf("looksLikeAddressQuery(%q) harus false", in)
+		}
+	}
+}
+
+func TestSummarizeSkipReasons(t *testing.T) {
+	order := []string{"ip", "coord", "nama"}
+	groups := map[string]*skipReason{
+		"ip":    {label: "IP tidak valid", count: 5, sample: "baris 3"},
+		"coord": {label: "koordinat tidak ditemukan", count: 20, sample: "baris 2"},
+		"nama":  {label: "nama kosong", count: 1, sample: "baris 9"},
+	}
+	got := summarizeSkipReasons(order, groups)
+	if !strings.Contains(got, "koordinat tidak ditemukan (20 baris") ||
+		!strings.Contains(got, "IP tidak valid (5 baris") ||
+		!strings.Contains(got, "nama kosong (1 baris") {
+		t.Fatalf("summarizeSkipReasons = %q", got)
+	}
+	// Alasan paling sering harus tampil lebih dulu.
+	if strings.Index(got, "koordinat") > strings.Index(got, "IP tidak valid") {
+		t.Fatalf("urutan alasan salah: %q", got)
+	}
+	if summarizeSkipReasons(nil, nil) != "" {
+		t.Fatal("tanpa alasan harus menghasilkan string kosong")
+	}
+}
+
 func TestExtractMapsURL(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"https://maps.app.goo.gl/abc?g_st=aw", "https://maps.app.goo.gl/abc?g_st=aw"},
@@ -322,7 +488,7 @@ func TestCoordFromQueryTextPlusCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// Referensi: Cawas, Klaten (hasil Nominatim sungguhan).
-		_, _ = w.Write([]byte(`[{"lat":"-7.7577425","lon":"110.6948009"}]`))
+		_, _ = w.Write([]byte(`[{"lat":"-7.7577425","lon":"110.6948009","display_name":"Cawas, Klaten, Jawa Tengah, Indonesia"}]`))
 	}))
 	defer srv.Close()
 	nominatimBase = srv.URL

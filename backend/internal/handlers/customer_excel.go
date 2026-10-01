@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/open-location-code/go"
@@ -188,19 +189,43 @@ func parseGoogleMapsCoord(s string) (float64, float64, bool) {
 // resolveMapsLink mengikuti redirect link Google Maps pendek (contoh:
 // https://maps.app.goo.gl/Da67oGYnbAhQpiMJA?g_st=ac) dan mengembalikan URL
 // akhir yang memuat koordinat.
+//
+// Google kadang menyisipkan halaman "consent" / CAPTCHA di tengah rantai
+// redirect, sehingga URL akhir bukan peta. Keadaan itu ditangani di sini: bila
+// URL akhir bukan halaman peta, lanjutkan ke parameter "continue"/"q" milik
+// consent dan/atau ambil koordinat dari body HTML sebelum menyerah.
 func resolveMapsLink(ctx context.Context, raw string) string {
 	raw = strings.TrimSpace(raw)
 	lower := strings.ToLower(raw)
 	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		return raw
 	}
+	current := raw
+	for hop := 0; hop < 5; hop++ {
+		next, ok := followMapsRedirect(ctx, current)
+		if !ok || next == "" || next == current {
+			break
+		}
+		if !isGoogleInterstitial(next) {
+			return next
+		}
+		current = next
+	}
+	return current
+}
+
+// followMapsRedirect melakukan satu permintaan GET dan mengembalikan URL setelah
+// satu hop redirect. ok=false bila permintaan gagal (DNS, timeout, TLS, 5xx).
+func followMapsRedirect(ctx context.Context, raw string) (string, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 	if err != nil {
-		return raw
+		return "", false
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+	req.Header.Set("User-Agent", mapsBrowserUA)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
 	client := &http.Client{
-		Timeout: 15 * time.Second,
+		Timeout: 20 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return http.ErrUseLastResponse
@@ -210,14 +235,93 @@ func resolveMapsLink(ctx context.Context, raw string) string {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return raw
+		return "", false
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	if u := resp.Request.URL; u != nil {
-		return u.String()
+	if resp.StatusCode >= 500 {
+		return "", false
 	}
-	return raw
+	if u := resp.Request.URL; u != nil {
+		return u.String(), true
+	}
+	return raw, true
+}
+
+// mapsBrowserUA meniru peramban desktop; Google sering membalas berbeda
+// (halaman consent/captcha) bila User-Agent bukan peramban.
+const mapsBrowserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+// isGoogleInterstitial melacak apakah URL adalah halaman perantara Google
+// (persetujuan cookie, verifikasi, atau CAPTCHA) yang bukan peta.
+func isGoogleInterstitial(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	path := strings.ToLower(u.Path)
+	switch {
+	case strings.Contains(host, "consent."):
+		return true
+	case strings.Contains(path, "/consent"):
+		return true
+	case strings.Contains(path, "/sorry"):
+		return true
+	case strings.Contains(path, "/interstitial"):
+		return true
+	}
+	return false
+}
+
+// unwrapInterstitial mem-follow halaman perantara Google dan mengembalikan URL
+// peta yang tersembunyi di parameter "continue"/"q"/"url".
+func unwrapInterstitial(ctx context.Context, raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	for _, key := range []string{"continue", "url", "q", "continueUrl"} {
+		v := strings.TrimSpace(q.Get(key))
+		if v == "" {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(v), "http") {
+			v = "https://" + strings.TrimPrefix(v, "//")
+		}
+		if _, _, ok := parseGoogleMapsCoord(v); ok {
+			return v
+		}
+		if next, ok := followMapsRedirect(ctx, v); ok && next != "" {
+			return next
+		}
+	}
+	return ""
+}
+
+// mapsHTMLCoordRe menangkap koordinat yang tertanam di body HTML halaman
+// Google Maps (payload !3dLAT!4dLNG / @LAT,LNG,ZOOMz). Dipakai saat URL
+// hasil redirect tidak memuat koordinat.
+var mapsHTMLCoordRe = regexp.MustCompile(`(?:!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?))|@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(\d+(?:\.\d+)?)z`)
+
+// coordFromMapsHTML membaca koordinat dari body HTML halaman Google Maps.
+func coordFromMapsHTML(body []byte) (float64, float64, bool) {
+	for _, m := range mapsHTMLCoordRe.FindAllSubmatch(body, 8) {
+		latS, lngS := m[1], m[2]
+		if latS == nil || lngS == nil {
+			latS, lngS = m[3], m[4]
+		}
+		if latS == nil || lngS == nil {
+			continue
+		}
+		lat, err1 := strconv.ParseFloat(string(latS), 64)
+		lng, err2 := strconv.ParseFloat(string(lngS), 64)
+		if err1 == nil && err2 == nil && validateCoord(lat, lng) {
+			return lat, lng, true
+		}
+	}
+	return 0, 0, false
 }
 
 // resolveMapsLinkCoord mencoba membaca koordinat langsung; bila gagal dan
@@ -225,28 +329,87 @@ func resolveMapsLink(ctx context.Context, raw string) string {
 // Bila URL akhir pun tidak memuat koordinat (link share titik/pin Google Maps
 // yang berisi "Plus Code" + alamat), lakukan decode Plus Code dengan referensi
 // lokasi dari Nominatim, lalu terakhir fallback geocoding alamatnya.
-func resolveMapsLinkCoord(ctx context.Context, maps string) (float64, float64, bool) {
+//
+// Nilai keempat berisi alasan kegagalan yang enak dibaca pengguna, sehingga
+// baris yang dilewati bisa dijelaskan (bukan sekadar "tidak ditemukan").
+func resolveMapsLinkCoordReason(ctx context.Context, maps string) (float64, float64, bool, string) {
 	maps = extractMapsURL(maps)
 	maps = strings.TrimSpace(maps)
 	if maps == "" {
-		return 0, 0, false
+		return 0, 0, false, "kolom Link Google Maps kosong"
 	}
 	if lat, lng, ok := parseGoogleMapsCoord(maps); ok {
-		return lat, lng, true
+		return lat, lng, true, ""
 	}
 	lower := strings.ToLower(maps)
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		final := resolveMapsLink(ctx, maps)
-		if lat, lng, ok := parseGoogleMapsCoord(final); ok {
-			return lat, lng, true
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		// Teks alamat/Plus Code langsung (tanpa URL).
+		if lat, lng, ok := coordFromQueryText(ctx, maps); ok {
+			return lat, lng, true, ""
 		}
-		if text := mapsQueryText(final); text != "" {
-			return coordFromQueryText(ctx, text)
+		return 0, 0, false, "tidak berisi koordinat dan bukan URL yang bisa dibuka"
+	}
+
+	final := resolveMapsLink(ctx, maps)
+	if lat, lng, ok := parseGoogleMapsCoord(final); ok {
+		return lat, lng, true, ""
+	}
+	// Halaman consent/captcha: coba buka URL peta yang disembunyikan di dalamnya.
+	if isGoogleInterstitial(final) {
+		if next := unwrapInterstitial(ctx, final); next != "" {
+			if lat, lng, ok := parseGoogleMapsCoord(next); ok {
+				return lat, lng, true, ""
+			}
+			final = next
 		}
+	}
+	// Fallback terakhir sebelum geocoding: koordinat yang tertanam di HTML.
+	if lat, lng, ok := coordFromMapsBody(ctx, final); ok {
+		return lat, lng, true, ""
+	}
+	if text := mapsQueryText(final); text != "" {
+		if lat, lng, ok := coordFromQueryText(ctx, text); ok {
+			return lat, lng, true, ""
+		}
+		return 0, 0, false, "link hanya berisi alamat yang gagal di-geocode (" + text + ")"
+	}
+	if strings.EqualFold(final, maps) {
+		return 0, 0, false, "link tidak bisa dibuka dari server (tidak ada redirect ke koordinat)"
+	}
+	return 0, 0, false, "link redirect ke halaman tanpa koordinat"
+}
+
+// coordFromMapsBody mengambil body halaman peta (batas 1 MB) lalu membaca
+// koordinat dari HTML-nya.
+func coordFromMapsBody(ctx context.Context, raw string) (float64, float64, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" {
 		return 0, 0, false
 	}
-	// Teks alamat/Plus Code langsung (tanpa URL).
-	return coordFromQueryText(ctx, maps)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return 0, 0, false
+	}
+	req.Header.Set("User-Agent", mapsBrowserUA)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil && len(body) == 0 {
+		return 0, 0, false
+	}
+	return coordFromMapsHTML(body)
+}
+
+// resolveMapsLinkCoord adalah pembungkus yang membuang alasan kegagalan.
+func resolveMapsLinkCoord(ctx context.Context, maps string) (float64, float64, bool) {
+	lat, lng, ok, _ := resolveMapsLinkCoordReason(ctx, maps)
+	return lat, lng, ok
 }
 
 // mapsQueryText mengambil teks alamat dari URL Google Maps yang tidak memuat
@@ -310,6 +473,9 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // layanan membalas 429/5xx atau jaringan gagal.
 func geocodePlace(ctx context.Context, query string) (float64, float64, bool) {
 	key := strings.TrimSpace(strings.ToLower(query))
+	if !looksLikeAddressQuery(key) {
+		return 0, 0, false
+	}
 	geocodeCache.Lock()
 	if v, ok := geocodeCache.m[key]; ok {
 		geocodeCache.Unlock()
@@ -359,8 +525,9 @@ func geocodePlace(ctx context.Context, query string) (float64, float64, bool) {
 		}
 
 		var results []struct {
-			Lat string `json:"lat"`
-			Lon string `json:"lon"`
+			Lat         string `json:"lat"`
+			Lon         string `json:"lon"`
+			DisplayName string `json:"display_name"`
 		}
 		if err := json.Unmarshal(body, &results); err != nil {
 			return 0, 0, false
@@ -368,16 +535,80 @@ func geocodePlace(ctx context.Context, query string) (float64, float64, bool) {
 		for _, r := range results {
 			lat, errLat := strconv.ParseFloat(r.Lat, 64)
 			lng, errLng := strconv.ParseFloat(r.Lon, 64)
-			if errLat == nil && errLng == nil && validateCoord(lat, lng) {
-				geocodeCache.Lock()
-				geocodeCache.m[key] = [2]float64{lat, lng}
-				geocodeCache.Unlock()
-				return lat, lng, true
+			if errLat != nil || errLng != nil || !validateCoord(lat, lng) {
+				continue
 			}
+			// Tanpa verifikasi kecocokan, teks sembarang ("abcdef", "rumah")
+			// bisa dipetakan ke tempat dengan nama serupa di negara lain —
+			// koordinat yang tersimpan lalu salah, lebih buruk daripada dilewati.
+			if !geocodeMatchesQuery(key, r.DisplayName) {
+				continue
+			}
+			geocodeCache.Lock()
+			geocodeCache.m[key] = [2]float64{lat, lng}
+			geocodeCache.Unlock()
+			return lat, lng, true
 		}
 		return 0, 0, false
 	}
 	return 0, 0, false
+}
+
+// geocodeStopWords adalah kata umum yang tidak membedakan lokasi.
+var geocodeStopWords = map[string]bool{
+	"jl": true, "jalan": true, "jln": true, "no": true, "nomor": true,
+	"rt": true, "rw": true, "kel": true, "kec": true, "kecamatan": true,
+	"kab": true, "kabupaten": true, "kota": true, "prov": true,
+	"provinsi": true, "kampung": true, "kp": true, "ds": true,
+	"desa": true, "rumah": true, "home": true, "the": true,
+}
+
+// looksLikeAddressQuery menolak teks yang jelas bukan alamat sebelum memanggil
+// layanan geocoding. Tanpa penyaring ini satu kata acak ("abcdef") bisa
+// terpetakan ke nama jalan/tempat yang sama persis di negara lain, sehingga
+// koordinat yang tersimpan justru salah.
+func looksLikeAddressQuery(text string) bool {
+	t := strings.TrimSpace(text)
+	if len(t) < 4 {
+		return false
+	}
+	for _, r := range t {
+		if unicode.IsDigit(r) {
+			return true
+		}
+	}
+	// Tanpa angka, teks harus punya minimal dua kata yang bukan kata umum.
+	distinctive := 0
+	for _, tok := range strings.FieldsFunc(strings.ToLower(t), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len(tok) >= 3 && !geocodeStopWords[tok] {
+			distinctive++
+		}
+	}
+	return distinctive >= 2
+}
+
+// geocodeMatchesQuery memastikan hasil geocoding benar-benar berkaitan dengan
+// teks yang dicari: minimal satu token distinctive dari query muncul di
+// display_name hasil.
+func geocodeMatchesQuery(query, displayName string) bool {
+	q := strings.ToLower(query)
+	d := strings.ToLower(displayName)
+	if d == "" {
+		return false
+	}
+	for _, tok := range strings.FieldsFunc(q, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len(tok) < 3 || geocodeStopWords[tok] {
+			continue
+		}
+		if strings.Contains(d, tok) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- Plus Code (Open Location Code) ----
