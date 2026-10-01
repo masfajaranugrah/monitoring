@@ -47,6 +47,10 @@ type ImportJob struct {
 	Skipped  int    `json:"skipped"`
 	Detail   string `json:"detail"`
 	Error    string `json:"error"`
+
+	// skipRows tidak ikut serialisasi ke status (memakai json:"-") supaya
+	// respons status tetap ringan; isinya diambil lewat endpoint unduh.
+	skipRows []skippedRow `json:"-"`
 }
 
 var (
@@ -190,17 +194,15 @@ func runCustomerImportJob(job *ImportJob, data []byte) {
 	// per-file supaya link yang sama tidak di-resolve berulang.
 	resolveCoordsParallel(ctx, parsed)
 
-	created, updated, skipped, firstSkip, err := persistImportRows(ctx, parsed)
+	res, err := persistImportRows(ctx, parsed)
 	if err != nil {
 		finishImportJob(job, nil, err.Error())
 		return
 	}
 
-	if created+updated > 0 || firstSkip == "" {
+	if res.created+res.updated > 0 || res.firstSkip == "" {
 		nudgeMonitor()
 	}
-
-	res := &importResult{created: created, updated: updated, skipped: skipped, firstSkip: firstSkip}
 	finishImportJob(job, res, "")
 }
 
@@ -374,23 +376,41 @@ func isTransientCoordFailure(reason string) bool {
 		strings.Contains(reason, "koneksi")
 }
 
+// skippedRow adalah satu baris yang tidak berhasil diimpor, lengkap dengan
+// alasannya. Daftar ini dipakai untuk membuat file Excel "data terlewat" yang
+// bisa diunduh pengguna, diperbaiki, lalu diimpor ulang.
+type skippedRow struct {
+	Row    int    `json:"row"`
+	Code   string `json:"code"`
+	Name   string `json:"name"`
+	IP     string `json:"ip"`
+	VPN    string `json:"vpn"`
+	Maps   string `json:"maps"`
+	Reason string `json:"reason"`
+}
+
 type importResult struct {
 	created   int
 	updated   int
 	skipped   int
 	firstSkip string
+	skipRows  []skippedRow
 }
 
 // persistImportRows menyimpan seluruh baris ke database dalam satu transaksi.
 // Setiap baris disimpan dalam SAVEPOINT-nya sendiri sehingga satu baris yang
 // gagal tidak menggagalkan baris lain.
-func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated, skipped int, firstSkip string, err error) {
+//
+// Baris yang dilewati dikumpulkan lengkap (isi + alasan) supaya bisa diunduh
+// pengguna sebagai file Excel, diperbaiki, lalu diimpor ulang.
+func persistImportRows(ctx context.Context, rows []*parsedRow) (res *importResult, err error) {
 	tx, err := database.Pool.Begin(ctx)
 	if err != nil {
-		return 0, 0, 0, "", errors.New("gagal mulai transaksi")
+		return nil, errors.New("gagal mulai transaksi")
 	}
 	defer tx.Rollback(ctx)
 
+	var created, updated, skipped int
 	// groups mengumpulkan semua alasan dilewati (bukan hanya yang pertama),
 	// supaya pengguna bisa memperbaiki file Excel-nya sekaligus.
 	var order []string
@@ -407,7 +427,23 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 		if g.sample == "" {
 			g.sample = fmt.Sprintf("baris %d", pr.idx+1)
 		}
+		code := pr.code
+		if code == "" && validateIP(pr.ip) {
+			// Sama seperti saat penyimpanan, kode kosong diisi dari IP agar
+			// file "data terlewat" bisa langsung diimpor ulang.
+			code = generateCustomerCode(pr.ip)
+		}
+		res.skipRows = append(res.skipRows, skippedRow{
+			Row:    pr.idx + 1,
+			Code:   code,
+			Name:   pr.name,
+			IP:     pr.ip,
+			VPN:    pr.vpn,
+			Maps:   pr.maps,
+			Reason: msg,
+		})
 	}
+	res = &importResult{}
 
 	for _, pr := range rows {
 		if pr.name == "" {
@@ -439,7 +475,7 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 		}
 
 		if _, execErr := tx.Exec(ctx, "SAVEPOINT import_customer"); execErr != nil {
-			return 0, 0, 0, "", errors.New("gagal mulai impor: " + execErr.Error())
+			return nil, errors.New("gagal mulai impor: " + execErr.Error())
 		}
 
 		// ID/kode yang sudah dipakai pelanggan → update data lama, bukan duplikat.
@@ -489,12 +525,14 @@ func persistImportRows(ctx context.Context, rows []*parsedRow) (created, updated
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, 0, "", errors.New("gagal menyimpan impor: " + err.Error())
+		return nil, errors.New("gagal menyimpan impor: " + err.Error())
 	}
+	res.created, res.updated, res.skipped = created, updated, skipped
+	res.firstSkip = summarizeSkipReasons(order, groups)
 	if skipped > 0 {
-		log.Printf("[customer] impor: %d baris dilewati — %s", skipped, summarizeSkipReasons(order, groups))
+		log.Printf("[customer] impor: %d baris dilewati — %s", skipped, res.firstSkip)
 	}
-	return created, updated, skipped, summarizeSkipReasons(order, groups), nil
+	return res, nil
 }
 
 // skipReason mengelompokkan baris yang dilewati karena alasan yang sama.
@@ -546,8 +584,44 @@ func finishImportJob(job *ImportJob, res *importResult, importErr string) {
 	job.Updated = res.updated
 	job.Skipped = res.skipped
 	job.Detail = res.firstSkip
+	job.skipRows = res.skipRows
 	// Tanpa satu pun baris berhasil → laporkan sebagai kegagalan (alur lama).
 	if res.created+res.updated == 0 && res.firstSkip != "" {
 		job.Error = "tidak ada pelanggan yang berhasil diimpor · " + res.firstSkip
 	}
+}
+
+// ImportJobSkipped mengunduh baris-baris yang dilewati pada satu pekerjaan
+// impor sebagai file Excel. Berkas memakai kolom yang sama persis dengan
+// template impor (tambahan kolom "Alasan" diabaikan saat impor ulang), sehingga
+// pengguna cukup memperbaiki baris yang bermasalah lalu mengunggah ulang
+// berkasnya.
+func ImportJobSkipped(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	importJobsMu.Lock()
+	job, ok := importJobs[id]
+	var skipRows []skippedRow
+	if ok {
+		skipRows = job.skipRows
+	}
+	importJobsMu.Unlock()
+
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "pekerjaan impor tidak ditemukan"})
+		return
+	}
+	if len(skipRows) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tidak ada data terlewat pada pekerjaan ini"})
+		return
+	}
+
+	xlsx, err := buildSkippedXLSX(skipRows)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "gagal membuat file excel: " + err.Error()})
+		return
+	}
+	filename := fmt.Sprintf("data-terlewat_%s.xlsx", time.Now().Format("20060102-150405"))
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+	c.Data(http.StatusOK,
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsx)
 }

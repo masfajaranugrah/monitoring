@@ -201,6 +201,70 @@ func TestTemplateCustomersProducesValidXLSX(t *testing.T) {
 	}
 }
 
+// TestBuildSkippedXLSX memastikan file "data terlewat" memakai kolom yang sama
+// dengan template impor (agar bisa diimpor ulang) plus kolom bantu, dan isi
+// baris/errorsinya benar.
+func TestBuildSkippedXLSX(t *testing.T) {
+	data, err := buildSkippedXLSX([]skippedRow{
+		{Row: 4, Code: "C-004", Name: "Budi", IP: "bukan ip", VPN: "VPN-1",
+			Maps: "https://maps.app.goo.gl/abc", Reason: "IP tidak valid"},
+		{Row: 9, Name: "Sari", IP: "10.0.0.7", VPN: "", Maps: "", Reason: "koordinat tidak ditemukan: timeout"},
+	})
+	if err != nil {
+		t.Fatalf("buildSkippedXLSX gagal: %v", err)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("hasil bukan xlsx valid: %v", err)
+	}
+	defer f.Close()
+
+	const sheet = "Data Terlewat"
+	grid, err := f.GetRows(sheet)
+	if err != nil {
+		t.Fatalf("baca sheet: %v", err)
+	}
+	if len(grid) != 3 {
+		t.Fatalf("harus header + 2 baris, dapat %d", len(grid))
+	}
+	wantHead := []string{"ID", "Nama", "IP Pelanggan", "VPN", "Link Google Maps", "Baris Asli", "Alasan"}
+	if len(grid[0]) != len(wantHead) {
+		t.Fatalf("header salah: %v", grid[0])
+	}
+	for i, h := range wantHead {
+		if grid[0][i] != h {
+			t.Fatalf("header[%d] = %q want %q", i, grid[0][i], h)
+		}
+	}
+	if grid[1][0] != "C-004" || grid[1][1] != "Budi" || grid[1][2] != "bukan ip" {
+		t.Fatalf("baris 1 salah: %v", grid[1])
+	}
+	if grid[1][5] != "4" || grid[1][6] != "IP tidak valid" {
+		t.Fatalf("baris 1 kolom bantu salah: %v", grid[1])
+	}
+	// Kode kosong harus tetap bisa diimpor ulang (diisi otomatis oleh server).
+	if grid[2][0] != "" || grid[2][1] != "Sari" {
+		t.Fatalf("baris 2 salah: %v", grid[2])
+	}
+
+	// Berkas hasil unduhan harus bisa dibaca lagi oleh parser impor.
+	colIdx, parsed, err := parseImportRows(data)
+	if err != nil {
+		t.Fatalf("data terlewat harus bisa diimpor ulang: %v", err)
+	}
+	prs := buildParsedRows(colIdx, parsed)
+	if len(prs) != 2 {
+		t.Fatalf("harus ada 2 baris, dapat %d", len(prs))
+	}
+	if prs[0].ip != "bukan ip" || prs[0].name != "Budi" || prs[0].maps != "https://maps.app.goo.gl/abc" {
+		t.Fatalf("baris hasil impor ulang salah: %+v", prs[0])
+	}
+	// Kolom "Baris Asli"/"Alasan" tidak boleh dianggap kolom data.
+	if _, ok := colIdx["baris asli"]; ok {
+		t.Fatal("kolom Baris Asli tidak boleh dipetakan sebagai kolom data")
+	}
+}
+
 func buildTestXLSX(t *testing.T, headers []string, rows [][]string) []byte {
 	t.Helper()
 	f := excelize.NewFile()

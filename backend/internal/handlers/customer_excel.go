@@ -921,3 +921,55 @@ func ExportCustomers(c *gin.Context) {
 	c.Data(http.StatusOK,
 		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 }
+
+// buildSkippedXLSX membuat file Excel berisi baris-baris yang gagal diimpor.
+//
+// Kolom A–E sengaja sama dengan template impor agar berkas ini bisa langsung
+// diimpor ulang setelah diperbaiki. Dua kolom tambahan ("Baris Asli" dan
+// "Alasan") hanya untuk membantu menelusuri; keduanya diabaikan pemetaan
+// header saat impor.
+func buildSkippedXLSX(rows []skippedRow) ([]byte, error) {
+	f := excelize.NewFile()
+	defer f.Close()
+	sheet := "Data Terlewat"
+	f.SetSheetName("Sheet1", sheet)
+
+	headers := []string{"ID", "Nama", "IP Pelanggan", "VPN", "Link Google Maps", "Baris Asli", "Alasan"}
+	headerStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"#e2e8f0"}, Pattern: 1},
+	})
+	reasonStyle, _ := f.NewStyle(&excelize.Style{Alignment: &excelize.Alignment{WrapText: true, Vertical: "top"}})
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sheet, cell, h)
+	}
+	f.SetCellStyle(sheet, "A1", "G1", headerStyle)
+	f.SetColWidth(sheet, "A", "A", 16)
+	f.SetColWidth(sheet, "B", "B", 26)
+	f.SetColWidth(sheet, "C", "C", 16)
+	f.SetColWidth(sheet, "D", "D", 16)
+	f.SetColWidth(sheet, "E", "E", 42)
+	f.SetColWidth(sheet, "F", "F", 10)
+	f.SetColWidth(sheet, "G", "G", 52)
+
+	for i, r := range rows {
+		rowIdx := i + 2
+		vals := []interface{}{r.Code, r.Name, r.IP, r.VPN, r.Maps, r.Row, r.Reason}
+		for j, v := range vals {
+			cell, _ := excelize.CoordinatesToCellName(j+1, rowIdx)
+			f.SetCellValue(sheet, cell, v)
+		}
+		f.SetCellStyle(sheet, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), reasonStyle)
+	}
+	f.SetPanes(sheet, &excelize.Panes{
+		Freeze: true, Split: false, XSplit: 0, YSplit: 1,
+		TopLeftCell: "A2", ActivePane: "bottomLeft",
+	})
+
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}

@@ -153,6 +153,7 @@ func main() {
 			// Import/export pelanggan via Excel (.xlsx)
 			auth.POST("/customers/import", middleware.AdminOnly(), handlers.ImportCustomers)
 			auth.GET("/customers/import/:id", handlers.ImportJobStatus)
+			auth.GET("/customers/import/:id/skipped", middleware.AdminOnly(), handlers.ImportJobSkipped)
 			auth.GET("/customers/export", handlers.ExportCustomers)
 			auth.GET("/customers/template", handlers.TemplateCustomers)
 

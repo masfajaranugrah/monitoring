@@ -42,6 +42,9 @@ const importFile = ref(null)
 const importDetail = ref('')
 const importError = ref('')
 const importResult = ref('')
+const importJobId = ref('')
+const importSkipped = ref(0)
+const downloadingSkipped = ref(false)
 
 function emptyForm() {
   return {
@@ -197,6 +200,8 @@ function pickImportFile() {
   importError.value = ''
   importResult.value = ''
   importDetail.value = ''
+  importJobId.value = ''
+  importSkipped.value = 0
   importFile.value = null
   document.getElementById('excel-import-input').click()
 }
@@ -223,10 +228,13 @@ async function doImport() {
   importError.value = ''
   importResult.value = ''
   importDetail.value = ''
+  importJobId.value = ''
+  importSkipped.value = 0
   const fd = new FormData()
   fd.append('file', importFile.value)
   try {
     const { data } = await api.post('/customers/import', fd)
+    importJobId.value = data.job_id
     await pollImport(data.job_id)
   } catch (e) {
     importError.value = e.response?.data?.error || 'Gagal mengimpor file'
@@ -250,6 +258,7 @@ async function pollImport(jobId) {
       return
     }
     if (data.status === 'running') continue
+    importSkipped.value = data.skipped || 0
     if (data.error) {
       importError.value = data.error
     } else {
@@ -260,6 +269,33 @@ async function pollImport(jobId) {
     if (data.detail) importDetail.value = data.detail
     load()
     return
+  }
+}
+
+// Unduh baris yang gagal diimpor sebagai file Excel, perbaiki, lalu impor
+// ulang berkasnya.
+async function downloadSkipped() {
+  if (!importJobId.value) return
+  downloadingSkipped.value = true
+  try {
+    const res = await api.get(`/customers/import/${importJobId.value}/skipped`, {
+      responseType: 'blob'
+    })
+    const blob = new Blob([res.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `data-terlewat_${new Date().toISOString().slice(0, 10)}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    importError.value = e.response?.data?.error || 'Gagal mengunduh data terlewat'
+  } finally {
+    downloadingSkipped.value = false
   }
 }
 
@@ -556,19 +592,31 @@ onMounted(() => {
     <ModemAccessModal v-if="modemCustomer" :customer="modemCustomer" @close="modemCustomer = null" />
     <ModemViewerModal v-if="viewerCustomer" :customer="viewerCustomer" @close="viewerCustomer = null" />
 
-    <div v-if="importResult || importError" class="modal-mask" @click.self="importResult = ''; importError = ''">
+    <div v-if="importResult || importError" class="modal-mask" @click.self="importResult = ''; importError = ''; importJobId = ''; importSkipped = 0">
       <div class="modal modal--sm">
         <h3>Hasil Import</h3>
         <p v-if="importResult" class="import-ok">{{ importResult }}</p>
         <p v-if="importError" class="login__error">{{ importError }}</p>
         <p v-if="importDetail" class="form-section__hint">{{ importDetail }}</p>
+        <p v-if="importSkipped > 0" class="form-section__hint">
+          {{ importSkipped }} baris tidak berhasil diimpor. Unduh file-nya, perbaiki kolom yang tertulis di sheet
+          "Alasan", lalu unggah ulang — kolom ID/Nama/IP/VPN/Link sudah siap dipakai.
+        </p>
         <p class="form-section__hint">
           Kolom Excel: ID, Nama, IP Pelanggan, VPN, Link Google Maps. Koordinat diambil otomatis dari link Google Maps
           (maps.google.com/?q=LAT,LNG, google.com/maps/@LAT,LNG, /place/.../!3dLAT!4dLNG, atau link pendek
           maps.app.goo.gl / goo.gl/maps). Unduh Template untuk contoh format.
         </p>
         <div class="modal__actions">
-          <button class="btn btn--primary" @click="importResult = ''; importError = ''; importDetail = ''">Tutup</button>
+          <button
+            v-if="importSkipped > 0"
+            class="btn"
+            :disabled="downloadingSkipped"
+            @click="downloadSkipped"
+          >
+            {{ downloadingSkipped ? 'Menyiapkan…' : `Download ${importSkipped} data terlewat` }}
+          </button>
+          <button class="btn btn--primary" @click="importResult = ''; importError = ''; importDetail = ''; importJobId = ''; importSkipped = 0">Tutup</button>
         </div>
       </div>
     </div>
